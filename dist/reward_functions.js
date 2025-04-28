@@ -45,8 +45,13 @@ exports.explorationReward = explorationReward;
 exports.calcReward = calcReward;
 const genai_1 = require("@google/genai");
 const dotenv = __importStar(require("dotenv-flow"));
-// Load environment variables
-dotenv.config();
+const path = __importStar(require("path"));
+// Load environment variables - explicitly include .env.local
+dotenv.config({
+    path: path.resolve(process.cwd()),
+    node_env: process.env.NODE_ENV || 'development',
+    default_node_env: 'development',
+});
 // Global state to track exploration
 const explorationTracking = {
     observedStates: new Set(),

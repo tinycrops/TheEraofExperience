@@ -3,6 +3,17 @@ import { Experience } from '../src/experiential_agent';
 import { ReplayBuffer, PPO } from '../src/rl_core';
 import { calcReward } from '../src/reward_functions';
 import * as dotenv from 'dotenv-flow';
+import * as path from 'path';
+
+// Configure dotenv to load .env.local
+dotenv.config({
+  path: path.resolve(process.cwd()),
+  node_env: process.env.NODE_ENV || 'test',
+  default_node_env: 'test',
+});
+
+// Use the real API key from .env.local for mocks
+const apiKey = process.env.GEMINI_API_KEY;
 
 // Mock the GoogleGenAI module
 jest.mock('@google/genai', () => {
@@ -40,9 +51,13 @@ jest.mock('fs', () => {
 
 describe('Experiential Agent Components', () => {
   beforeAll(() => {
-    // Mock environment variables
-    process.env.GEMINI_API_KEY = 'fake-api-key';
+    // Use the real API key from .env.local
+    process.env.GEMINI_API_KEY = apiKey;
     process.env.GEMINI_MODEL = 'gemini-2.0-flash';
+    
+    if (!process.env.GEMINI_API_KEY) {
+      console.warn('Warning: No API key found in environment variables for tests');
+    }
   });
 
   describe('ReplayBuffer', () => {
@@ -117,8 +132,8 @@ describe('Experiential Agent Components', () => {
       // Import the actual GoogleGenAI for typings
       const { GoogleGenAI } = jest.requireActual('@google/genai');
       
-      // Create mock genAI client
-      const mockGenAI = new GoogleGenAI({apiKey: 'fake-key'});
+      // Create mock genAI client with real API key
+      const mockGenAI = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY});
       
       // Create PPO agent
       const agent = new PPO({
@@ -141,8 +156,8 @@ describe('Experiential Agent Components', () => {
       // Import the actual GoogleGenAI for typings
       const { GoogleGenAI } = jest.requireActual('@google/genai');
       
-      // Create mock genAI client
-      const mockGenAI = new GoogleGenAI({apiKey: 'fake-key'});
+      // Create mock genAI client with real API key
+      const mockGenAI = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY});
       
       // Create PPO agent
       const agent = new PPO({

@@ -40,8 +40,20 @@ const reward_functions_1 = require("./reward_functions");
 const dotenv = __importStar(require("dotenv-flow"));
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
-// Load environment variables
-dotenv.config();
+// Load environment variables - explicitly include .env.local
+dotenv.config({
+    path: path.resolve(process.cwd()),
+    node_env: process.env.NODE_ENV || 'development',
+    default_node_env: 'development',
+});
+// Log API key (first few characters only for security)
+const apiKey = process.env.GEMINI_API_KEY;
+if (apiKey) {
+    console.log(`API Key loaded: ${apiKey.substring(0, 5)}...`);
+}
+else {
+    console.warn('API Key not found in environment variables!');
+}
 // Helper function to extract observation from message
 function extractObservation(msg) {
     if (!msg.serverContent) {

@@ -5,8 +5,20 @@ import * as dotenv from 'dotenv-flow';
 import * as fs from 'fs';
 import * as path from 'path';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables - explicitly include .env.local
+dotenv.config({
+  path: path.resolve(process.cwd()),
+  node_env: process.env.NODE_ENV || 'development',
+  default_node_env: 'development',
+});
+
+// Log API key (first few characters only for security)
+const apiKey = process.env.GEMINI_API_KEY;
+if (apiKey) {
+  console.log(`API Key loaded: ${apiKey.substring(0, 5)}...`);
+} else {
+  console.warn('API Key not found in environment variables!');
+}
 
 // Define types to match the new SDK
 interface LiveServerMessage {

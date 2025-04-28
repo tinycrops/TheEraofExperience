@@ -1,8 +1,13 @@
 import { GoogleGenAI } from '@google/genai';
 import * as dotenv from 'dotenv-flow';
+import * as path from 'path';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables - explicitly include .env.local
+dotenv.config({
+  path: path.resolve(process.cwd()),
+  node_env: process.env.NODE_ENV || 'development',
+  default_node_env: 'development',
+});
 
 async function main() {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -11,6 +16,7 @@ async function main() {
   }
 
   console.log('Initializing Gemini API...');
+  console.log(`API Key loaded: ${apiKey.substring(0, 5)}...`);
   const genAI = new GoogleGenAI({apiKey});
   
   const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';

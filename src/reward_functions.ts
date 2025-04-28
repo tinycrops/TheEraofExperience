@@ -7,9 +7,14 @@
 
 import { GoogleGenAI } from '@google/genai';
 import * as dotenv from 'dotenv-flow';
+import * as path from 'path';
 
-// Load environment variables
-dotenv.config();
+// Load environment variables - explicitly include .env.local
+dotenv.config({
+  path: path.resolve(process.cwd()),
+  node_env: process.env.NODE_ENV || 'development',
+  default_node_env: 'development',
+});
 
 // Global state to track exploration
 const explorationTracking = {

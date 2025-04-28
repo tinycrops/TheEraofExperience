@@ -40,8 +40,13 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const experiential_agent_1 = require("./experiential_agent");
 const readline = __importStar(require("readline"));
 const dotenv = __importStar(require("dotenv-flow"));
-// Load environment variables
-dotenv.config();
+const path = __importStar(require("path"));
+// Load environment variables - explicitly include .env.local
+dotenv.config({
+    path: path.resolve(process.cwd()),
+    node_env: process.env.NODE_ENV || 'development',
+    default_node_env: 'development',
+});
 // Create readline interface
 const rl = readline.createInterface({
     input: process.stdin,
