@@ -1,6 +1,6 @@
 # Task ID: 3
 # Title: Implement Tool Schemas and Function Calling
-# Status: pending
+# Status: done
 # Dependencies: 2
 # Priority: high
 # Description: Add support for tool use including web search, database queries, and multimodal inputs.
@@ -9,3 +9,68 @@ Extend the agent to: 1) Define tool schemas in the live.connect call, including 
 
 # Test Strategy:
 Test function calling with mock external services. Verify the agent can detect function calls, execute them, and properly handle the results.
+
+# Subtasks:
+## 1. Define Tool Schema Interface and Web Search Schema [done]
+### Dependencies: None
+### Description: Create interfaces for tool schemas and implement the web search tool schema as the first example
+### Details:
+1. Create a `ToolSchema` interface that defines the structure for all tools (name, description, parameters schema, etc.)
+2. Create a `WebSearchToolSchema` that implements this interface with appropriate parameters
+3. Extend the `live.connect` method to accept an optional `tools` array parameter
+4. Update type definitions to include tool schemas in the connection options
+5. Test by creating a connection with the web search tool schema defined
+6. Ensure the schema is properly passed to the underlying API
+
+## 2. Implement Function Call Detection and Handling [done]
+### Dependencies: 3.1
+### Description: Add logic to detect and process function calls in server responses
+### Details:
+1. Extend the message parser to identify `functionCall` objects in server responses
+2. Create a `FunctionCallHandler` class to process function calls based on their name
+3. Update the session flow to intercept function calls before sending to the client
+4. Add a registry to map function names to their handlers
+5. Implement error handling for invalid function calls
+6. Test with mock server responses containing function calls
+7. Ensure the function call detection doesn't interfere with normal message processing
+
+## 3. Implement Web Search Function Execution [done]
+### Dependencies: 3.2
+### Description: Create the web search function that will be called when the model requests a web search
+### Details:
+1. Create a `WebSearchExecutor` class that performs HTTP requests to a search API
+2. Configure the search API endpoint and authentication
+3. Implement parameter validation against the schema defined in subtask 1
+4. Process search results into a structured format
+5. Add rate limiting and error handling for the search API
+6. Register the web search executor with the function call handler
+7. Test the web search with various queries
+8. Create unit tests with mocked HTTP responses
+
+## 4. Implement Result Streaming with sendClientContent [done]
+### Dependencies: 3.2, 3.3
+### Description: Stream function execution results back to the client session
+### Details:
+1. Extend the session interface to include a `sendClientContent` method
+2. Implement the method to stream content back to the client
+3. Modify the function call handler to use this method for streaming results
+4. Add support for different content formats (text, structured data)
+5. Ensure proper ordering of messages when streaming function results
+6. Implement progress indicators for long-running functions
+7. Test with the web search function to verify results are properly streamed
+8. Add error handling for failed content streaming
+
+## 5. Add Support for Image Uploads and Multimodal Inputs [done]
+### Dependencies: 3.4
+### Description: Implement file upload functionality with support for images and other file types
+### Details:
+1. Implement the `files.upload` API endpoint
+2. Create the `createPartFromUri` function to convert uploaded files to message parts
+3. Add support for image MIME types and validation
+4. Implement secure file handling and storage
+5. Update the session interface to handle multimodal inputs
+6. Create a tool schema for image processing functions
+7. Test uploading various image formats and sizes
+8. Implement cleanup procedures for temporary files
+9. Add documentation for supported file types and size limits
+

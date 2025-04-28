@@ -1,7 +1,7 @@
 # gemini API tool calling
 model = 'gemini-2.0-flash'
 GEMINI_API_KEY api keys are in .env.local
-we are using the Gemini API (npm i @google/genai) and NOT THE VERTEX API
+we are using the latest version of Gemini API (npm i @google/genai@0.10.0), NOT google-generativeai and NOT THE VERTEX API
 
 don't ask for permission before fixing errors, just fix them.
 you must think like a self-motivated senior software engineer - take initiative and solve problems

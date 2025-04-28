@@ -43,18 +43,16 @@ async function runDemo() {
     console.log('Initializing experiential agent...');
     const session = await runExperientialAgent();
     
-    // Try to extract sessionId from session (if available)
-    // Fallback: ask user for sessionId if not present
-    let sessionId: string | undefined = (session && session.sessionId) ? session.sessionId : undefined;
-    if (!sessionId) {
-      sessionId = await askQuestion('Enter sessionId (or leave blank to skip user rating persistence): ');
-      if (!sessionId) sessionId = undefined;
-    }
+    // Since we don't get a sessionId from the session object anymore, generate our own
+    const demoSessionId = `demo-${Date.now()}`;
+    console.log(`Using demo session ID: ${demoSessionId}`);
     
     // Set up a graceful shutdown handler
     process.on('SIGINT', async () => {
       console.log('\nShutting down...');
-      await session.close();
+      if (session) {
+        await session.close();
+      }
       rl.close();
       process.exit(0);
     });
@@ -85,19 +83,25 @@ async function runDemo() {
       }
       
       // Send the user message to the session
-      await session.sendClientContent({ text: userInput });
+      if (session && typeof session.sendClientContent === 'function') {
+        await session.sendClientContent({ text: userInput });
+      } else {
+        console.log('Warning: Cannot send message - session or sendClientContent is not available');
+      }
       
       // AUTOMATED: Generate random feedback rating (1-5) and persist
       const rating = Math.floor(Math.random() * 5) + 1;
       console.log(`(Automated) Feedback: ${rating}/5`);
-      if (sessionId) {
-        persistUserRating(sessionId, rating);
+      if (demoSessionId) {
+        persistUserRating(demoSessionId, rating);
       }
     }
     
     // Close the session and readline
     console.log('Thank you for using the Experience Era agent!');
-    await session.close();
+    if (session && typeof session.close === 'function') {
+      await session.close();
+    }
     rl.close();
     
   } catch (error) {

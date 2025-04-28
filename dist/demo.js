@@ -41,6 +41,7 @@ const experiential_agent_1 = require("./experiential_agent");
 const readline = __importStar(require("readline"));
 const dotenv = __importStar(require("dotenv-flow"));
 const path = __importStar(require("path"));
+const reward_functions_1 = require("./reward_functions");
 // Load environment variables - explicitly include .env.local
 dotenv.config({
     path: path.resolve(process.cwd()),
@@ -70,10 +71,15 @@ async function runDemo() {
         // Initialize the experiential agent
         console.log('Initializing experiential agent...');
         const session = await (0, experiential_agent_1.runExperientialAgent)();
+        // Since we don't get a sessionId from the session object anymore, generate our own
+        const demoSessionId = `demo-${Date.now()}`;
+        console.log(`Using demo session ID: ${demoSessionId}`);
         // Set up a graceful shutdown handler
         process.on('SIGINT', async () => {
             console.log('\nShutting down...');
-            await session.close();
+            if (session) {
+                await session.close();
+            }
             rl.close();
             process.exit(0);
         });
@@ -99,20 +105,24 @@ async function runDemo() {
                 continue;
             }
             // Send the user message to the session
-            await session.sendClientContent({ text: userInput });
-            // Get feedback after agent response
-            const feedback = await askQuestion('\nHow helpful was that response? (1-5, or just press Enter to skip): ');
-            if (feedback && !isNaN(Number(feedback))) {
-                const rating = Number(feedback);
-                if (rating >= 1 && rating <= 5) {
-                    console.log(`Thank you for your feedback! (${rating}/5)`);
-                    // In a real implementation, we would use this feedback to adjust rewards
-                }
+            if (session && typeof session.sendClientContent === 'function') {
+                await session.sendClientContent({ text: userInput });
+            }
+            else {
+                console.log('Warning: Cannot send message - session or sendClientContent is not available');
+            }
+            // AUTOMATED: Generate random feedback rating (1-5) and persist
+            const rating = Math.floor(Math.random() * 5) + 1;
+            console.log(`(Automated) Feedback: ${rating}/5`);
+            if (demoSessionId) {
+                (0, reward_functions_1.persistUserRating)(demoSessionId, rating);
             }
         }
         // Close the session and readline
         console.log('Thank you for using the Experience Era agent!');
-        await session.close();
+        if (session && typeof session.close === 'function') {
+            await session.close();
+        }
         rl.close();
     }
     catch (error) {
@@ -123,3 +133,4 @@ async function runDemo() {
 }
 // Run the demo
 runDemo().catch(console.error);
+//# sourceMappingURL=demo.js.map

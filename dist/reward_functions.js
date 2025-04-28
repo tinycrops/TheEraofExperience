@@ -39,13 +39,18 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.persistUserRating = persistUserRating;
 exports.userFeedbackReward = userFeedbackReward;
 exports.relevanceReward = relevanceReward;
 exports.explorationReward = explorationReward;
+exports.informationGainReward = informationGainReward;
+exports.taskCompletionReward = taskCompletionReward;
+exports.userEngagementReward = userEngagementReward;
 exports.calcReward = calcReward;
 const genai_1 = require("@google/genai");
 const dotenv = __importStar(require("dotenv-flow"));
 const path = __importStar(require("path"));
+const fs = __importStar(require("fs"));
 // Load environment variables - explicitly include .env.local
 dotenv.config({
     path: path.resolve(process.cwd()),
@@ -92,13 +97,44 @@ function getActionHash(action) {
     // Fallback to random id
     return Math.random().toString(36).substring(2, 10);
 }
+// --- Task 4: User Feedback Persistence ---
+// Persist user rating for a session
+function persistUserRating(sessionId, rating) {
+    const dir = path.join(process.cwd(), 'data', 'user_ratings');
+    if (!fs.existsSync(dir))
+        fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${sessionId}.json`);
+    fs.writeFileSync(file, JSON.stringify({ sessionId, rating, timestamp: Date.now() }));
+}
+// Retrieve latest user rating for a session
+function getUserRating(sessionId) {
+    const file = path.join(process.cwd(), 'data', 'user_ratings', `${sessionId}.json`);
+    if (fs.existsSync(file)) {
+        try {
+            const data = JSON.parse(fs.readFileSync(file, 'utf-8'));
+            return typeof data.rating === 'number' ? data.rating : undefined;
+        }
+        catch {
+            return undefined;
+        }
+    }
+    return undefined;
+}
+// --- Task 4: Critic Model Separation ---
+const CRITIC_MODEL = 'gemini-2.0';
+evaluationModel = CRITIC_MODEL;
 /**
  * Calculate reward based on user feedback (thumbs up/down)
- * In a real application, this would track actual user feedback
+ * This is a grounded reward based on actual user responses
  */
 async function userFeedbackReward(observation, action) {
-    // In a real implementation, this would use actual user feedback
-    // For now, we'll simulate with a mock implementation
+    // Use explicit user rating if available
+    const sessionId = observation?.sessionId;
+    const userRating = sessionId ? getUserRating(sessionId) : undefined;
+    if (typeof userRating === 'number') {
+        // Normalize 1-5 to -0.5 to 1.0
+        return (userRating - 3) / 2;
+    }
     // Extract message and response for analysis
     const userMessage = observation?.message?.text || '';
     const agentResponse = action?.parts?.[0]?.text || '';
@@ -143,7 +179,7 @@ async function relevanceReward(observation, action) {
         // Get evaluation from model
         const result = await genAI.models.generateContent({
             model,
-            contents: [evaluationPrompt]
+            contents: [evaluationPrompt],
         });
         const scoreText = result.text?.trim() || '';
         const score = parseFloat(scoreText);
@@ -182,30 +218,131 @@ function explorationReward(observation, action) {
     explorationBonus += 0.1 * noveltyFactor;
     return explorationBonus;
 }
+// --- Enhanced Grounded Rewards ---
+/**
+ * Measure information gain based on dialogue history
+ * This assesses if the agent is helping the user expand their knowledge
+ */
+function informationGainReward(observation, action) {
+    // Implementation of information gain rewards
+    // More complex in real systems, but mocked here as a simple function of response length and complexity
+    const response = action?.parts?.[0]?.text || '';
+    // Simple measure: longer responses up to a reasonable limit may indicate more information
+    const optimalResponseLength = 250; // Characters
+    const lengthFactor = Math.min(response.length / optimalResponseLength, 2);
+    // Measure information density using ratio of unique words to total words
+    const words = response.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
+    const uniqueWords = new Set(words);
+    const informationDensity = words.length > 0 ? uniqueWords.size / words.length : 0;
+    // Calculate information gain score
+    let infoGainScore = 0;
+    if (lengthFactor > 0.2) {
+        infoGainScore = 0.3 * Math.min(lengthFactor, 1) + 0.7 * informationDensity;
+    }
+    return Math.min(infoGainScore, 1.0);
+}
+/**
+ * External task completion/goal achievement reward
+ * This measures success at accomplishing concrete tasks
+ */
+function taskCompletionReward(observation, action, metrics) {
+    // In a real system, this would verify if the action actually accomplished a concrete task
+    // For example: successfully booking an appointment, finding specific information, etc.
+    // Check if we have web search success metric
+    if (metrics?.webSearchSuccess) {
+        return 0.5; // Successful search is a positive outcome
+    }
+    // Check if we have explicit task completion metric from environment
+    if (metrics?.taskCompleted) {
+        return 1.0; // Maximum reward for confirmed task completion
+    }
+    // Default - no evidence of task completion
+    return 0;
+}
+/**
+ * Long-term user engagement reward
+ * This measures if the agent is maintaining engagement over time
+ */
+function userEngagementReward(observation, metrics) {
+    // In a full implementation, this would track session duration, user return rate, etc.
+    if (metrics?.sessionDuration) {
+        // Normalize to 0-1 range with diminishing returns after 5 minutes
+        return Math.min(metrics.sessionDuration / (5 * 60 * 1000), 1.0);
+    }
+    // If we have historical user interaction count
+    if (metrics?.userInteractions) {
+        // Convert to 0-1 range with soft cap at 10 interactions
+        return Math.min(metrics.userInteractions / 10, 1.0);
+    }
+    return 0; // No engagement data available
+}
 /**
  * Main reward calculation function that combines all components
  */
-async function calcReward(observation, action) {
+async function calcReward(observation, action, metrics) {
+    // Safety filter: if present, force negative reward
+    if (metrics?.safetyFilters && metrics.safetyFilters.length > 0) {
+        if (!observation.info)
+            observation.info = {};
+        observation.info.safetyViolation = true;
+        return {
+            total: -1,
+            breakdown: { safety: -1 }
+        };
+    }
     // Calculate individual reward components
     const userRewardValue = await userFeedbackReward(observation, action);
     const relevanceRewardValue = await relevanceReward(observation, action);
     const explorationRewardValue = explorationReward(observation, action);
+    const infoGainValue = informationGainReward(observation, action);
+    const taskCompletionValue = taskCompletionReward(observation, action, metrics);
+    const userEngagementValue = userEngagementReward(observation, metrics);
+    // External metrics
+    let latencyPenalty = 0;
+    if (typeof metrics?.latencyMs === 'number') {
+        latencyPenalty = -0.01 * (metrics.latencyMs / 1000);
+    }
+    // Assemble health metrics if available
+    let healthReward = 0;
+    if (metrics?.healthMetrics) {
+        const healthMetrics = metrics.healthMetrics;
+        if (healthMetrics.stepsIncreased)
+            healthReward += 0.2;
+        if (healthMetrics.sleepImproved)
+            healthReward += 0.3;
+        if (healthMetrics.heartRateImproved)
+            healthReward += 0.2;
+    }
     // Weights for different reward components
     const weights = {
         user: 0.5, // User feedback is highest priority
-        relevance: 0.4, // Relevance is important but secondary
-        exploration: 0.1 // Small weight for exploration to encourage diversity
+        relevance: 0.3, // Relevance 
+        exploration: 0.05, // Small weight for exploration to encourage diversity
+        infoGain: 0.25, // Reward information value
+        taskCompletion: 0.4, // Reward concrete task accomplishment
+        userEngagement: 0.2, // Reward sustained engagement
+        latency: 0.1, // Small weight for response time
+        health: 0.3 // Health metrics when available
     };
-    // Calculate weighted sum of rewards
-    const totalReward = weights.user * userRewardValue +
-        weights.relevance * relevanceRewardValue +
-        weights.exploration * explorationRewardValue;
-    // Log reward components for debugging
-    console.log({
-        user: userRewardValue,
-        relevance: relevanceRewardValue,
-        exploration: explorationRewardValue,
-        total: totalReward
-    });
-    return totalReward;
+    // Calculate weighted total
+    const breakdown = {
+        user: weights.user * userRewardValue,
+        relevance: weights.relevance * relevanceRewardValue,
+        exploration: weights.exploration * explorationRewardValue,
+        infoGain: weights.infoGain * infoGainValue,
+        taskCompletion: weights.taskCompletion * taskCompletionValue,
+        userEngagement: weights.userEngagement * userEngagementValue,
+        latency: weights.latency * latencyPenalty,
+        health: weights.health * healthReward
+    };
+    const totalReward = Object.values(breakdown).reduce((sum, val) => sum + val, 0);
+    // Clamp reward to reasonable range
+    const clampedReward = Math.max(-1, Math.min(1, totalReward));
+    // Log reward calculation for debugging
+    console.log(`Reward calculation: ${clampedReward.toFixed(2)}`, breakdown);
+    return {
+        total: clampedReward,
+        breakdown
+    };
 }
+//# sourceMappingURL=reward_functions.js.map

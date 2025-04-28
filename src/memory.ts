@@ -41,8 +41,13 @@ export class VectorMemory {
   /**
    * Embeds text using Gemini's embedContent API and stores it with metadata.
    */
-  async addMemory(text: string, obsId: string, metadata?: Record<string, any>): Promise<void> {
+  async addMemory(text: string, metadata?: Record<string, any>): Promise<void> {
     try {
+      // Generate a unique observation ID if not provided in metadata
+      const obsId = metadata?.sessionId ? 
+        `${metadata.sessionId}-${metadata.timestamp || Date.now()}` : 
+        `mem-${Date.now()}`;
+        
       const response = await this.ai.models.embedContent({
         model: 'text-embedding-004',
         contents: text,

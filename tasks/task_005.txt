@@ -1,6 +1,6 @@
 # Task ID: 5
 # Title: Implement Nightly Summarization Job
-# Status: pending
+# Status: done
 # Dependencies: 2
 # Priority: medium
 # Description: Create a process to summarize daily experiences and store them efficiently.
@@ -9,3 +9,332 @@ Develop a script that: 1) Runs on a daily schedule, 2) Chunks the previous day's
 
 # Test Strategy:
 Test the summarization with sample NDJSON files. Verify the chunking logic works with various log sizes and the summaries are properly formatted and stored.
+
+# Subtasks:
+## 1. Create Daily Log Processing and Chunking Module [done]
+### Dependencies: None
+### Description: Develop a module that reads the previous day's NDJSON logs and chunks them appropriately for summarization
+### Details:
+Implementation details:
+1. Create a new module `logProcessor.js` that exports functions for identifying and reading the previous day's logs
+2. Implement a function `getYesterdayLogs()` that determines the date range for 'yesterday' and locates the corresponding log files
+3. Implement a `chunkLogs(logs)` function that splits large log files into manageable chunks for processing (consider memory constraints)
+4. Add helper functions to parse NDJSON format and extract relevant information for summarization
+5. Include error handling for missing files, corrupted data, and other edge cases
+6. Add logging throughout the process to track execution
+7. Write unit tests to verify log identification, reading, and chunking functionality
+8. Test with sample log data of varying sizes to ensure proper chunking behavior
+
+<info added on 2025-04-28T09:05:51.300Z>
+## Implementation Specifics
+
+### Technical Approach for Log Processing
+- Use Node.js streams API (`fs.createReadStream`) for memory-efficient processing of large log files
+- Implement line-by-line reading with `readline` interface to avoid loading entire files into memory
+- Consider using the `split2` npm package for reliable NDJSON parsing that handles edge cases
+
+### Chunking Strategy
+```typescript
+// Example implementation of chunking with token counting
+async function chunkLogs(logs: LogEntry[], maxTokens: number = 30000): Promise<LogEntry[][]> {
+  const chunks: LogEntry[][] = [];
+  let currentChunk: LogEntry[] = [];
+  let currentTokenCount = 0;
+  
+  for (const log of logs) {
+    // Estimate tokens for this log entry
+    const logContent = JSON.stringify(log);
+    const tokenCount = await models.countTokens(logContent);
+    
+    // If adding this log would exceed max tokens, start a new chunk
+    if (currentTokenCount + tokenCount > maxTokens && currentChunk.length > 0) {
+      chunks.push(currentChunk);
+      currentChunk = [];
+      currentTokenCount = 0;
+    }
+    
+    // Add log to current chunk
+    currentChunk.push(log);
+    currentTokenCount += tokenCount;
+  }
+  
+  // Add the last chunk if not empty
+  if (currentChunk.length > 0) {
+    chunks.push(currentChunk);
+  }
+  
+  return chunks;
+}
+```
+
+### Date Handling
+- Use `luxon` or `date-fns` for reliable date manipulation across timezones
+- Store logs in UTC format but display in local timezone for readability
+- Include logic to handle logs that span midnight boundaries
+
+### Error Recovery Mechanisms
+- Implement exponential backoff for file read retries
+- Add checkpointing to resume processing after failures
+- Create a recovery log to track partially processed files
+
+### Performance Considerations
+- Benchmark different chunking strategies (by line count, token count, time windows)
+- Consider parallel processing for multiple log files using worker threads
+- Implement caching of recently processed logs to avoid redundant processing
+
+### Testing Strategy
+- Create mock log generators that produce variable-sized entries
+- Test with artificially large entries that exceed chunk size
+- Verify chunking preserves conversation context by keeping related entries together
+</info added on 2025-04-28T09:05:51.300Z>
+
+## 2. Implement Summary Generation with generateContentStream [done]
+### Dependencies: 5.1
+### Description: Create a module that processes log chunks and generates summaries using the generateContentStream API
+### Details:
+Implementation details:
+1. Create a new module `summaryGenerator.js` that handles the summarization process
+2. Implement a function `generateSummary(logChunks)` that takes chunked logs from the previous subtask
+3. For each chunk, call the generateContentStream API with appropriate prompts to create meaningful summaries
+4. Design the prompt template to extract key information from logs (e.g., important events, patterns, anomalies)
+5. Combine chunk summaries into a cohesive daily summary with sections and formatting
+6. Format the final summary as markdown with appropriate headers, lists, and sections
+7. Include error handling for API failures, malformed responses, and timeout scenarios
+8. Implement retry logic for failed API calls with exponential backoff
+9. Add detailed logging of the summarization process
+10. Write tests using mock API responses to verify summary generation functionality
+
+<info added on 2025-04-28T09:12:27.051Z>
+## Implementation Plan for Subtask 5.2: Implement Summary Generation with generateContentStream
+
+### Technical Implementation Details
+
+#### Prompt Engineering
+```typescript
+function createPrompt(chunk: LogEntry[], date: string): string {
+  return `
+You are analyzing system logs for ${date}. Summarize the following log entries, focusing on:
+1. Critical errors and exceptions
+2. Performance bottlenecks (response times > 500ms)
+3. Unusual access patterns or security concerns
+4. System state changes (restarts, config updates)
+
+Format your response in markdown with appropriate headers and bullet points.
+
+LOG ENTRIES:
+${JSON.stringify(chunk, null, 2)}
+`;
+}
+```
+
+#### Stream Handling Implementation
+```typescript
+async function handleContentStream(stream: AsyncIterable<GenerateContentResponse>): Promise<string> {
+  let summaryText = '';
+  
+  for await (const response of stream) {
+    if (response.candidates?.[0]?.content?.parts?.[0]?.text) {
+      summaryText += response.candidates[0].content.parts[0].text;
+    }
+  }
+  
+  return summaryText;
+}
+```
+
+#### Retry Logic Example
+```typescript
+async function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1000): Promise<T> {
+  let retries = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (retries >= maxRetries) throw error;
+      
+      const delay = initialDelay * Math.pow(2, retries);
+      console.log(`API call failed, retrying in ${delay}ms...`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      retries++;
+    }
+  }
+}
+```
+
+#### Combining Chunk Summaries
+```typescript
+function combineChunkSummaries(summaries: string[], date: string): string {
+  return `# System Log Summary for ${date}
+
+## Overview
+${generateOverviewSection(summaries)}
+
+${summaries.map((summary, i) => `## Log Segment ${i+1}\n${summary}`).join('\n\n')}
+
+## Recommendations
+${generateRecommendations(summaries)}
+`;
+}
+```
+
+#### Performance Considerations
+- Use batch processing for large log sets (>1000 entries)
+- Implement concurrency control with Promise.all and chunking:
+  ```typescript
+  const summaryPromises = chunks.map(chunk => 
+    callWithRetry(() => summarizeChunk(chunk, date))
+  );
+  const chunkSummaries = await Promise.all(summaryPromises);
+  ```
+- Consider adding a cache for similar log patterns to reduce API calls
+
+#### Testing Strategy
+- Create mock log data representing various scenarios (errors, normal operation, etc.)
+- Test retry mechanism by injecting temporary failures
+- Validate markdown formatting with regex patterns
+- Measure performance with different chunk sizes to determine optimal configuration
+</info added on 2025-04-28T09:12:27.051Z>
+
+## 3. Implement Storage and Indexing System [done]
+### Dependencies: 5.2
+### Description: Create a system to store generated summaries in both local files and cold storage, with an index to track all summaries
+### Details:
+Implementation details:
+1. Create a new module `summaryStorage.js` for handling storage operations
+2. Implement a function `saveSummaryLocally(date, summary)` that writes summaries to daily_summary.md files in an organized directory structure
+3. Implement a function `uploadToColdStorage(date, summary)` that uses files.upload API to store summaries in cold storage
+4. Create an indexing system that maintains a JSON file tracking all available summaries with metadata
+5. Implement functions to update the index when new summaries are added
+6. Add functions to query the index for retrieving specific summaries
+7. Include error handling for file system operations and API calls
+8. Implement retry logic for failed uploads
+9. Add logging for all storage operations
+10. Write tests for local storage, cold storage (with mocks), and index management
+11. Ensure the system handles edge cases like duplicate uploads and index corruption
+
+<info added on 2025-04-28T09:14:58.903Z>
+## Implementation Details
+
+### Directory Structure
+```
+data/
+  summaries/
+    YYYY/
+      MM/
+        DD/
+          daily_summary.md
+  index/
+    summaries_index.json
+```
+
+### Index Schema
+```typescript
+interface SummaryIndexEntry {
+  date: string;           // ISO format date (YYYY-MM-DD)
+  localPath: string;      // Path to local file
+  coldStorageUri?: string; // URI in cold storage (if uploaded)
+  coldStorageName?: string; // Name in cold storage
+  byteSize: number;       // Size of summary
+  createdAt: string;      // ISO timestamp
+  lastUpdatedAt: string;  // ISO timestamp
+  uploadAttempts: number; // Number of upload attempts
+  uploadSuccess: boolean; // Whether upload succeeded
+  checksum: string;       // MD5 hash of content for integrity verification
+}
+```
+
+### Atomic Index Updates
+```typescript
+async function atomicIndexUpdate(updateFn: (index: SummaryIndexEntry[]) => SummaryIndexEntry[]): Promise<void> {
+  const lockFile = 'data/index/summaries_index.lock';
+  try {
+    // Create lock file
+    await fs.writeFile(lockFile, Date.now().toString());
+    
+    // Read current index
+    const index = await getSummaryIndex();
+    
+    // Apply update
+    const updatedIndex = updateFn(index);
+    
+    // Write to temp file first
+    const tempFile = 'data/index/summaries_index.json.tmp';
+    await fs.writeFile(tempFile, JSON.stringify(updatedIndex, null, 2));
+    
+    // Rename temp file to actual index file (atomic operation)
+    await fs.rename(tempFile, 'data/index/summaries_index.json');
+  } finally {
+    // Remove lock file
+    try { await fs.unlink(lockFile); } catch (e) { /* ignore */ }
+  }
+}
+```
+
+### Retry Logic Implementation
+```typescript
+async function withRetry<T>(
+  operation: () => Promise<T>, 
+  maxRetries = 3, 
+  delay = 1000
+): Promise<T> {
+  let lastError: Error;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`Attempt ${attempt} failed: ${error.message}`);
+      
+      if (attempt < maxRetries) {
+        // Exponential backoff with jitter
+        const jitter = Math.random() * 0.3 + 0.85; // 0.85-1.15
+        await new Promise(r => setTimeout(r, delay * Math.pow(2, attempt-1) * jitter));
+      }
+    }
+  }
+  
+  throw lastError;
+}
+```
+
+### Integrity Verification
+```typescript
+import crypto from 'crypto';
+
+function calculateChecksum(content: string): string {
+  return crypto.createHash('md5').update(content).digest('hex');
+}
+
+async function verifySummaryIntegrity(date: string): Promise<boolean> {
+  const index = await getSummaryIndex();
+  const entry = index.find(e => e.date === date);
+  
+  if (!entry) return false;
+  
+  const content = await fs.readFile(entry.localPath, 'utf8');
+  const currentChecksum = calculateChecksum(content);
+  
+  return currentChecksum === entry.checksum;
+}
+```
+</info added on 2025-04-28T09:14:58.903Z>
+
+## 4. Create Scheduled Job Runner with Error Handling [done]
+### Dependencies: 5.1, 5.2, 5.3
+### Description: Develop the main scheduler that orchestrates the entire summarization process and runs it on a daily schedule
+### Details:
+Implementation details:
+1. Create a main module `summarizationJob.js` that orchestrates the entire process
+2. Implement a function `runDailySummarization()` that calls the modules from previous subtasks in sequence
+3. Set up a scheduling mechanism using cron or a similar tool to run the job at a specific time daily
+4. Implement comprehensive error handling that catches and logs errors from any part of the process
+5. Add recovery mechanisms for partial failures (e.g., if summarization works but storage fails)
+6. Implement notification system for critical failures that require human intervention
+7. Create detailed logging throughout the process with appropriate log levels
+8. Add performance monitoring to track execution time and resource usage
+9. Implement a dry-run mode for testing the pipeline without making permanent changes
+10. Write integration tests that verify the end-to-end process
+11. Create a configuration system to easily adjust parameters like scheduling time, chunk size, and storage paths
+12. Document the entire system with setup instructions and troubleshooting guides
+

@@ -1,0 +1,35 @@
+{
+  "streamId": "demo-stream-1745845375014",
+  "state": "active",
+  "createdAt": "2025-04-28T13:02:55.015Z",
+  "lastUpdatedAt": "2025-04-28T13:02:55.015Z",
+  "experienceCount": 0,
+  "goals": [
+    {
+      "id": "health-improvement-1",
+      "description": "Help the user improve their health metrics over 30 days",
+      "metrics": {
+        "steps": {
+          "current": 3000,
+          "target": 10000,
+          "weight": 0.4
+        },
+        "sleepHours": {
+          "current": 6,
+          "target": 8,
+          "weight": 0.3
+        },
+        "waterIntake": {
+          "current": 2,
+          "target": 8,
+          "weight": 0.3
+        }
+      },
+      "priority": 8,
+      "timeframe": {
+        "start": "2025-04-28T13:02:55.016Z",
+        "deadline": "2025-05-28T13:02:55.016Z"
+      }
+    }
+  ]
+}

@@ -14,7 +14,7 @@
       "id": 2,
       "title": "Create Basic Agent Loop with Experience Logging",
       "description": "Implement the core experiential agent with NDJSON logging of all interactions.",
-      "status": "pending",
+      "status": "done",
       "dependencies": [
         1
       ],
@@ -32,13 +32,14 @@
       ],
       "priority": "high",
       "details": "Extend the agent to: 1) Define tool schemas in the live.connect call, including webSearch and other functions, 2) Detect and handle functionCall in server responses, 3) Execute the appropriate function (HTTP fetch, DB query), 4) Stream results back to the session with sendClientContent, 5) Add support for image uploads via files.upload API and createPartFromUri. Implement at least webSearch as the first tool.",
-      "testStrategy": "Test function calling with mock external services. Verify the agent can detect function calls, execute them, and properly handle the results."
+      "testStrategy": "Test function calling with mock external services. Verify the agent can detect function calls, execute them, and properly handle the results.",
+      "subtasks": []
     },
     {
       "id": 4,
       "title": "Develop Reward Functions",
       "description": "Create a system for calculating rewards based on user feedback, critic evaluation, and external metrics.",
-      "status": "pending",
+      "status": "done",
       "dependencies": [
         2
       ],
@@ -50,13 +51,59 @@
       "id": 5,
       "title": "Implement Nightly Summarization Job",
       "description": "Create a process to summarize daily experiences and store them efficiently.",
-      "status": "pending",
+      "status": "done",
       "dependencies": [
         2
       ],
       "priority": "medium",
       "details": "Develop a script that: 1) Runs on a daily schedule, 2) Chunks the previous day's NDJSON logs, 3) Uses generateContentStream to create summaries, 4) Writes summaries to daily_summary.md files, 5) Uploads summaries to cold storage using files.upload, 6) Maintains an index of available summaries. Include proper error handling and logging for this background process.",
-      "testStrategy": "Test the summarization with sample NDJSON files. Verify the chunking logic works with various log sizes and the summaries are properly formatted and stored."
+      "testStrategy": "Test the summarization with sample NDJSON files. Verify the chunking logic works with various log sizes and the summaries are properly formatted and stored.",
+      "subtasks": [
+        {
+          "id": 1,
+          "title": "Create Daily Log Processing and Chunking Module",
+          "description": "Develop a module that reads the previous day's NDJSON logs and chunks them appropriately for summarization",
+          "dependencies": [],
+          "details": "Implementation details:\n1. Create a new module `logProcessor.js` that exports functions for identifying and reading the previous day's logs\n2. Implement a function `getYesterdayLogs()` that determines the date range for 'yesterday' and locates the corresponding log files\n3. Implement a `chunkLogs(logs)` function that splits large log files into manageable chunks for processing (consider memory constraints)\n4. Add helper functions to parse NDJSON format and extract relevant information for summarization\n5. Include error handling for missing files, corrupted data, and other edge cases\n6. Add logging throughout the process to track execution\n7. Write unit tests to verify log identification, reading, and chunking functionality\n8. Test with sample log data of varying sizes to ensure proper chunking behavior\n\n<info added on 2025-04-28T09:05:51.300Z>\n## Implementation Specifics\n\n### Technical Approach for Log Processing\n- Use Node.js streams API (`fs.createReadStream`) for memory-efficient processing of large log files\n- Implement line-by-line reading with `readline` interface to avoid loading entire files into memory\n- Consider using the `split2` npm package for reliable NDJSON parsing that handles edge cases\n\n### Chunking Strategy\n```typescript\n// Example implementation of chunking with token counting\nasync function chunkLogs(logs: LogEntry[], maxTokens: number = 30000): Promise<LogEntry[][]> {\n  const chunks: LogEntry[][] = [];\n  let currentChunk: LogEntry[] = [];\n  let currentTokenCount = 0;\n  \n  for (const log of logs) {\n    // Estimate tokens for this log entry\n    const logContent = JSON.stringify(log);\n    const tokenCount = await models.countTokens(logContent);\n    \n    // If adding this log would exceed max tokens, start a new chunk\n    if (currentTokenCount + tokenCount > maxTokens && currentChunk.length > 0) {\n      chunks.push(currentChunk);\n      currentChunk = [];\n      currentTokenCount = 0;\n    }\n    \n    // Add log to current chunk\n    currentChunk.push(log);\n    currentTokenCount += tokenCount;\n  }\n  \n  // Add the last chunk if not empty\n  if (currentChunk.length > 0) {\n    chunks.push(currentChunk);\n  }\n  \n  return chunks;\n}\n```\n\n### Date Handling\n- Use `luxon` or `date-fns` for reliable date manipulation across timezones\n- Store logs in UTC format but display in local timezone for readability\n- Include logic to handle logs that span midnight boundaries\n\n### Error Recovery Mechanisms\n- Implement exponential backoff for file read retries\n- Add checkpointing to resume processing after failures\n- Create a recovery log to track partially processed files\n\n### Performance Considerations\n- Benchmark different chunking strategies (by line count, token count, time windows)\n- Consider parallel processing for multiple log files using worker threads\n- Implement caching of recently processed logs to avoid redundant processing\n\n### Testing Strategy\n- Create mock log generators that produce variable-sized entries\n- Test with artificially large entries that exceed chunk size\n- Verify chunking preserves conversation context by keeping related entries together\n</info added on 2025-04-28T09:05:51.300Z>",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 2,
+          "title": "Implement Summary Generation with generateContentStream",
+          "description": "Create a module that processes log chunks and generates summaries using the generateContentStream API",
+          "dependencies": [
+            1
+          ],
+          "details": "Implementation details:\n1. Create a new module `summaryGenerator.js` that handles the summarization process\n2. Implement a function `generateSummary(logChunks)` that takes chunked logs from the previous subtask\n3. For each chunk, call the generateContentStream API with appropriate prompts to create meaningful summaries\n4. Design the prompt template to extract key information from logs (e.g., important events, patterns, anomalies)\n5. Combine chunk summaries into a cohesive daily summary with sections and formatting\n6. Format the final summary as markdown with appropriate headers, lists, and sections\n7. Include error handling for API failures, malformed responses, and timeout scenarios\n8. Implement retry logic for failed API calls with exponential backoff\n9. Add detailed logging of the summarization process\n10. Write tests using mock API responses to verify summary generation functionality\n\n<info added on 2025-04-28T09:12:27.051Z>\n## Implementation Plan for Subtask 5.2: Implement Summary Generation with generateContentStream\n\n### Technical Implementation Details\n\n#### Prompt Engineering\n```typescript\nfunction createPrompt(chunk: LogEntry[], date: string): string {\n  return `\nYou are analyzing system logs for ${date}. Summarize the following log entries, focusing on:\n1. Critical errors and exceptions\n2. Performance bottlenecks (response times > 500ms)\n3. Unusual access patterns or security concerns\n4. System state changes (restarts, config updates)\n\nFormat your response in markdown with appropriate headers and bullet points.\n\nLOG ENTRIES:\n${JSON.stringify(chunk, null, 2)}\n`;\n}\n```\n\n#### Stream Handling Implementation\n```typescript\nasync function handleContentStream(stream: AsyncIterable<GenerateContentResponse>): Promise<string> {\n  let summaryText = '';\n  \n  for await (const response of stream) {\n    if (response.candidates?.[0]?.content?.parts?.[0]?.text) {\n      summaryText += response.candidates[0].content.parts[0].text;\n    }\n  }\n  \n  return summaryText;\n}\n```\n\n#### Retry Logic Example\n```typescript\nasync function callWithRetry<T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 1000): Promise<T> {\n  let retries = 0;\n  while (true) {\n    try {\n      return await fn();\n    } catch (error) {\n      if (retries >= maxRetries) throw error;\n      \n      const delay = initialDelay * Math.pow(2, retries);\n      console.log(`API call failed, retrying in ${delay}ms...`, error);\n      await new Promise(resolve => setTimeout(resolve, delay));\n      retries++;\n    }\n  }\n}\n```\n\n#### Combining Chunk Summaries\n```typescript\nfunction combineChunkSummaries(summaries: string[], date: string): string {\n  return `# System Log Summary for ${date}\n\n## Overview\n${generateOverviewSection(summaries)}\n\n${summaries.map((summary, i) => `## Log Segment ${i+1}\\n${summary}`).join('\\n\\n')}\n\n## Recommendations\n${generateRecommendations(summaries)}\n`;\n}\n```\n\n#### Performance Considerations\n- Use batch processing for large log sets (>1000 entries)\n- Implement concurrency control with Promise.all and chunking:\n  ```typescript\n  const summaryPromises = chunks.map(chunk => \n    callWithRetry(() => summarizeChunk(chunk, date))\n  );\n  const chunkSummaries = await Promise.all(summaryPromises);\n  ```\n- Consider adding a cache for similar log patterns to reduce API calls\n\n#### Testing Strategy\n- Create mock log data representing various scenarios (errors, normal operation, etc.)\n- Test retry mechanism by injecting temporary failures\n- Validate markdown formatting with regex patterns\n- Measure performance with different chunk sizes to determine optimal configuration\n</info added on 2025-04-28T09:12:27.051Z>",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 3,
+          "title": "Implement Storage and Indexing System",
+          "description": "Create a system to store generated summaries in both local files and cold storage, with an index to track all summaries",
+          "dependencies": [
+            2
+          ],
+          "details": "Implementation details:\n1. Create a new module `summaryStorage.js` for handling storage operations\n2. Implement a function `saveSummaryLocally(date, summary)` that writes summaries to daily_summary.md files in an organized directory structure\n3. Implement a function `uploadToColdStorage(date, summary)` that uses files.upload API to store summaries in cold storage\n4. Create an indexing system that maintains a JSON file tracking all available summaries with metadata\n5. Implement functions to update the index when new summaries are added\n6. Add functions to query the index for retrieving specific summaries\n7. Include error handling for file system operations and API calls\n8. Implement retry logic for failed uploads\n9. Add logging for all storage operations\n10. Write tests for local storage, cold storage (with mocks), and index management\n11. Ensure the system handles edge cases like duplicate uploads and index corruption\n\n<info added on 2025-04-28T09:14:58.903Z>\n## Implementation Details\n\n### Directory Structure\n```\ndata/\n  summaries/\n    YYYY/\n      MM/\n        DD/\n          daily_summary.md\n  index/\n    summaries_index.json\n```\n\n### Index Schema\n```typescript\ninterface SummaryIndexEntry {\n  date: string;           // ISO format date (YYYY-MM-DD)\n  localPath: string;      // Path to local file\n  coldStorageUri?: string; // URI in cold storage (if uploaded)\n  coldStorageName?: string; // Name in cold storage\n  byteSize: number;       // Size of summary\n  createdAt: string;      // ISO timestamp\n  lastUpdatedAt: string;  // ISO timestamp\n  uploadAttempts: number; // Number of upload attempts\n  uploadSuccess: boolean; // Whether upload succeeded\n  checksum: string;       // MD5 hash of content for integrity verification\n}\n```\n\n### Atomic Index Updates\n```typescript\nasync function atomicIndexUpdate(updateFn: (index: SummaryIndexEntry[]) => SummaryIndexEntry[]): Promise<void> {\n  const lockFile = 'data/index/summaries_index.lock';\n  try {\n    // Create lock file\n    await fs.writeFile(lockFile, Date.now().toString());\n    \n    // Read current index\n    const index = await getSummaryIndex();\n    \n    // Apply update\n    const updatedIndex = updateFn(index);\n    \n    // Write to temp file first\n    const tempFile = 'data/index/summaries_index.json.tmp';\n    await fs.writeFile(tempFile, JSON.stringify(updatedIndex, null, 2));\n    \n    // Rename temp file to actual index file (atomic operation)\n    await fs.rename(tempFile, 'data/index/summaries_index.json');\n  } finally {\n    // Remove lock file\n    try { await fs.unlink(lockFile); } catch (e) { /* ignore */ }\n  }\n}\n```\n\n### Retry Logic Implementation\n```typescript\nasync function withRetry<T>(\n  operation: () => Promise<T>, \n  maxRetries = 3, \n  delay = 1000\n): Promise<T> {\n  let lastError: Error;\n  \n  for (let attempt = 1; attempt <= maxRetries; attempt++) {\n    try {\n      return await operation();\n    } catch (error) {\n      lastError = error as Error;\n      console.warn(`Attempt ${attempt} failed: ${error.message}`);\n      \n      if (attempt < maxRetries) {\n        // Exponential backoff with jitter\n        const jitter = Math.random() * 0.3 + 0.85; // 0.85-1.15\n        await new Promise(r => setTimeout(r, delay * Math.pow(2, attempt-1) * jitter));\n      }\n    }\n  }\n  \n  throw lastError;\n}\n```\n\n### Integrity Verification\n```typescript\nimport crypto from 'crypto';\n\nfunction calculateChecksum(content: string): string {\n  return crypto.createHash('md5').update(content).digest('hex');\n}\n\nasync function verifySummaryIntegrity(date: string): Promise<boolean> {\n  const index = await getSummaryIndex();\n  const entry = index.find(e => e.date === date);\n  \n  if (!entry) return false;\n  \n  const content = await fs.readFile(entry.localPath, 'utf8');\n  const currentChecksum = calculateChecksum(content);\n  \n  return currentChecksum === entry.checksum;\n}\n```\n</info added on 2025-04-28T09:14:58.903Z>",
+          "status": "done",
+          "parentTaskId": 5
+        },
+        {
+          "id": 4,
+          "title": "Create Scheduled Job Runner with Error Handling",
+          "description": "Develop the main scheduler that orchestrates the entire summarization process and runs it on a daily schedule",
+          "dependencies": [
+            1,
+            2,
+            3
+          ],
+          "details": "Implementation details:\n1. Create a main module `summarizationJob.js` that orchestrates the entire process\n2. Implement a function `runDailySummarization()` that calls the modules from previous subtasks in sequence\n3. Set up a scheduling mechanism using cron or a similar tool to run the job at a specific time daily\n4. Implement comprehensive error handling that catches and logs errors from any part of the process\n5. Add recovery mechanisms for partial failures (e.g., if summarization works but storage fails)\n6. Implement notification system for critical failures that require human intervention\n7. Create detailed logging throughout the process with appropriate log levels\n8. Add performance monitoring to track execution time and resource usage\n9. Implement a dry-run mode for testing the pipeline without making permanent changes\n10. Write integration tests that verify the end-to-end process\n11. Create a configuration system to easily adjust parameters like scheduling time, chunk size, and storage paths\n12. Document the entire system with setup instructions and troubleshooting guides",
+          "status": "done",
+          "parentTaskId": 5
+        }
+      ]
     },
     {
       "id": 6,
@@ -122,16 +169,6 @@
       "priority": "low",
       "details": "Implement: 1) Integration tests that use real Gemini countTokens but mock generateContent, 2) Property-based tests for ReplayBuffer size() and sample() methods, 3) End-to-end tests for the full agent loop, 4) Performance tests for the vector memory module. Use a testing framework compatible with the project's structure and include both unit and integration tests.",
       "testStrategy": "Run the test suite regularly during development. Verify it catches API drift and implementation errors. Measure test coverage to ensure comprehensive testing."
-    },
-    {
-      "id": 11,
-      "title": "Implement Persistent Storage for VectorMemory using HNSW or SQLite",
-      "description": "Enhance the VectorMemory module to support disk-based persistent storage of embeddings and metadata using either HNSW or SQLite, while maintaining the existing API and ensuring efficient similarity search capabilities.",
-      "details": "Extend the VectorMemory module to store vector embeddings and associated metadata on disk rather than only in memory. This implementation should:\n\n1. Create a new storage backend that uses either:\n   - HNSW (Hierarchical Navigable Small World) for efficient approximate nearest neighbor search\n   - SQLite with appropriate indexing for vector similarity search\n\n2. Maintain the existing API methods:\n   - `addMemory(text, embedding, metadata)` - Should now persist to disk\n   - `querySimilar(embedding, limit)` - Should query from persistent storage\n\n3. Implement a configuration mechanism to specify storage location, index parameters, and other relevant settings\n\n4. Add a migration utility to transfer existing in-memory data to the new persistent storage\n\n5. Ensure thread-safety for concurrent read/write operations\n\n6. Implement proper resource management (connection pooling if using SQLite, index loading/unloading for HNSW)\n\n7. Add performance optimizations:\n   - Caching frequently accessed vectors\n   - Batch operations for bulk imports\n   - Background indexing for large datasets\n\n8. Handle edge cases:\n   - Graceful recovery from corrupted storage\n   - Automatic reindexing when needed\n   - Versioning for future compatibility\n\nDependencies to consider:\n- For HNSW: hnswlib, faiss, or similar libraries\n- For SQLite: sqlite3 with appropriate extensions for vector operations\n\nPerformance requirements:\n- Should support at least 1M vectors with sub-second query times\n- Minimal memory footprint regardless of dataset size",
-      "testStrategy": "Testing should verify both functional correctness and performance characteristics:\n\n1. Unit Tests:\n   - Test persistence by adding vectors, restarting the service, and verifying they can be retrieved\n   - Verify that metadata is correctly stored and retrieved with vectors\n   - Test edge cases: empty database, very large vectors, malformed inputs\n   - Verify API compatibility with existing code that uses VectorMemory\n\n2. Integration Tests:\n   - Test the migration utility with various dataset sizes\n   - Verify that existing application flows work with the new storage backend\n\n3. Performance Tests:\n   - Benchmark query times for different dataset sizes (10K, 100K, 1M vectors)\n   - Measure memory usage during operation\n   - Test concurrent read/write operations and verify correctness\n   - Compare performance between HNSW and SQLite implementations\n\n4. Stress Tests:\n   - Test with very large datasets to verify scaling capabilities\n   - Simulate disk failures or corruption and verify recovery\n\n5. Specific Test Cases:\n   - Add 1000 vectors, restart, verify all are retrievable\n   - Perform similarity search and compare results with in-memory implementation\n   - Verify that updates to existing vectors are correctly persisted\n   - Test with various embedding dimensions (128, 384, 768, 1536)\n   - Verify that deleting vectors removes them from persistent storage",
-      "status": "pending",
-      "dependencies": [],
-      "priority": "high"
     }
   ],
   "metadata": {

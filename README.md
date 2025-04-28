@@ -1,111 +1,89 @@
-# The Era of Experience: Experiential AI Agent
+# The Era of Experience
 
-This project implements an experiential AI agent based on the concepts from "The Era of Experience" paper by David Silver and Richard S. Sutton. The agent learns from continuous interactions with its environment using reinforcement learning techniques.
+This project demonstrates the key principles from ["The Era of Experience" paper by David Silver and Richard S. Sutton](The%20Era%20of%20Experience%20Paper%20(1).txt). It shows how AI agents can learn from their own experiences in an ongoing stream over time, moving beyond the limitations of human-derived data.
 
-## Key Concepts
+## Key Principles
 
-- **Streams of Experience**: The agent maintains a continuous session with the environment, enabling long-term learning and adaptation.
-- **Autonomous Actions**: The agent can take actions in its environment through function calling and API interactions.
-- **Grounded Observations**: The agent receives real observations from its environment rather than just synthetic data.
-- **Grounded Rewards**: The agent's learning is driven by real-world signals rather than solely human feedback.
-- **Planning and Reasoning**: The agent uses its model to reason about the consequences of its actions.
+The implementation explores four fundamental principles:
 
-## Project Structure
-
-- `src/experiential_agent.ts` - The core experiential agent implementation
-- `src/rl_core.ts` - Reinforcement learning components (ReplayBuffer, PPO)
-- `src/reward_functions.ts` - Functions for calculating rewards
-- `src/index.ts` - Main entry point
-- `src/demo.ts` - Interactive demo script for hands-on testing
-- `tests/` - Unit tests for the implementation
-
-## Features
-
-- 💬 Live interactions using Gemini's real-time API
-- 📊 Multi-component reward system (user feedback, relevance, exploration)
-- 🧠 Experience-based learning using the Proximal Policy Optimization (PPO) algorithm
-- 📝 Automatic persistence of experiences to NDJSON files
-- 🔄 Automatic advantage calculation with GAE(λ)
-- 🛠️ Action generation and evaluation with a systematic approach
+1. **Streams**: Continuous learning from long-term experience
+2. **Actions and Observations**: Rich interaction with the environment
+3. **Rewards**: Grounded in concrete environmental signals
+4. **Planning and Reasoning**: Focused on real-world consequences
 
 ## Getting Started
 
 ### Prerequisites
 
-- Node.js 18+ and npm
-- A Gemini API key (from Google AI Studio)
+- Node.js 18+ 
+- TypeScript
+- Gemini API key (set in `.env.local`)
 
 ### Installation
 
-1. Clone this repository
-2. Install dependencies:
-   ```
-   cd TheEraofExperience
-   npm install
-   ```
-3. Copy the `.env.example` file to `.env.local` and add your Gemini API key:
-   ```
-   cp .env.example .env.local
-   # Edit .env.local to add:
-   # GEMINI_API_KEY=your_api_key_here
-   # GEMINI_MODEL=gemini-2.0-flash
-   ```
+```bash
+# Clone this repository
+git clone <repository-url>
 
-### Running the Agent
+# Install dependencies
+npm install
 
-Build and run the interactive demo:
-```
-npm run build
-npx ts-node src/demo.ts
+# Configure your API key 
+# (You should already have a .env.local file with GEMINI_API_KEY)
 ```
 
-For development with automatic reloading:
+### Running the Demo
+
+We offer different demos to showcase the principles:
+
+```bash
+# Run the simple demo (recommended)
+npm run simple-demo
+
+# Run the more complex demo
+npm run demo
+
+# Run the full application
+npm run start
 ```
-npm run dev
-```
 
-Run the tests:
-```
-npm test
-```
+## Project Structure
 
-## Customization
+- `src/`
+  - `experiential_agent.ts` - Main agent implementation
+  - `experience_stream.ts` - Manages continuous streams of experience
+  - `world_model.ts` - Predicts the consequences of actions
+  - `experiential_planning.ts` - Planning using the world model
+  - `reward_functions.ts` - Grounded reward calculation
+  - `memory.ts` - Vector memory for storing experiences
+  - `rl_core.ts` - Core reinforcement learning algorithms
+  - `simple-demo.ts` - Simple demo of the main principles
 
-### Reward Functions
+## Features
 
-To customize the reward calculation, edit `src/reward_functions.ts`. The current implementation includes:
+- **Experience Streams**: The agent maintains a continuous stream of experience and adapts over time
+- **Grounded Actions**: Beyond just text responses, the agent can take actions in the environment
+- **World Modeling**: The agent builds a model of the world based on its experiences
+- **Experience-based Planning**: The agent plans by simulating the consequences of its actions
+- **Grounded Rewards**: The agent optimizes for real-world outcomes, not just human feedback
 
-- **User Feedback Reward**: Based on user's explicit rating or inferred from response patterns
-- **Relevance Reward**: Uses a second Gemini model to score the relevance of responses to queries
-- **Exploration Reward**: Encourages diverse behavior by rewarding new states and actions
+## How It Works
 
-### Agent Configuration
+1. The agent receives observations from the environment
+2. It uses its past experiences to inform its predictions and actions
+3. It takes actions that can include both text responses and environmental actions
+4. It receives rewards based on concrete outcomes in the environment
+5. It updates its world model based on new experiences
+6. It plans future actions by simulating their consequences
 
-Modify the system instructions and tools in `src/experiential_agent.ts` to customize the agent's behavior and capabilities.
+## References
 
-### Learning Algorithm
-
-The implementation includes a proper PPO algorithm with:
-- Advantage estimation using Generalized Advantage Estimation (GAE)
-- Policy updates based on high-reward experiences
-- In-context learning to improve model responses
-
-## Data Collection
-
-The agent automatically saves all experiences to daily NDJSON files in the `data/` directory. This provides:
-
-- A growing dataset for offline training
-- A record of all interactions and rewards
-- Material for analyzing agent behavior over time
-
-## Next Steps
-
-- Implement full tool calling capabilities
-- Add multimodal observation support
-- Develop a proper web interface for interactions
-- Implement distributed experience collection
-- Add reinforcement learning from human feedback (RLHF)
+- [The Era of Experience Paper](The%20Era%20of%20Experience%20Paper%20(1).txt) - Original paper by David Silver and Richard S. Sutton
+- [Gemini API Documentation](https://googleapis.github.io/js-genai/main/index.html) - Documentation for the Gemini JavaScript/TypeScript SDK
 
 ## License
 
-MIT 
+MIT
+
+## Acknowledgements
+This implementation is based on "The Era of Experience" paper by David Silver and Richard S. Sutton. 

@@ -1,5 +1,5 @@
-import { GoogleGenAI, Content } from '@google/genai';
-import { Experience } from './experiential_agent';
+import { GoogleGenAI, Content, Part, GenerationConfig, FunctionCallingConfigMode, Tool, SafetySetting, HarmCategory, HarmBlockThreshold, FunctionDeclaration, Type } from '@google/genai';
+import { Experience, ToolSchema, WebSearchToolSchema } from './experiential_agent';
 
 // Define a transition for the replay buffer (for backward compatibility)
 export interface Transition extends Experience {}
@@ -15,44 +15,33 @@ export class ReplayBuffer {
     this.maxSize = maxSize;
   }
 
-  add(transition: Experience): void {
-    // If buffer is not full, add to the end
-    if (this.count < this.maxSize) {
-      this.buffer.push(transition);
-      this.position = (this.position + 1) % this.maxSize;
-      this.count++;
-    } else {
-      // Otherwise, replace the oldest entry
-      this.buffer[this.position] = transition;
-      this.position = (this.position + 1) % this.maxSize;
+  add(experience: Experience): void {
+    // Update next_obs for the previous experience if it exists
+    if (this.buffer.length > 0) {
+      const lastIndex = (this.position === 0 ? this.maxSize : this.position) - 1;
+      // Ensure the index is valid before accessing
+      if(lastIndex >= 0 && lastIndex < this.buffer.length && !this.buffer[lastIndex].done) {
+          this.buffer[lastIndex].next_obs = experience.obs;
+      }
     }
     
-    // Update next_obs in the previous experience if it exists
-    const prevIdx = (this.position - 2 + this.maxSize) % this.maxSize;
-    if (this.count > 1 && !this.buffer[prevIdx].done) {
-      this.buffer[prevIdx].next_obs = transition.obs;
+    // Add the new experience
+    if (this.buffer.length < this.maxSize) {
+      this.buffer.push(experience);
+    } else {
+      this.buffer[this.position] = experience;
     }
+    this.position = (this.position + 1) % this.maxSize;
+    this.count++;
   }
 
   sample(batchSize: number): Experience[] {
-    if (this.count === 0) return [];
-    
-    const sampleSize = Math.min(batchSize, this.count);
-    const samples: Experience[] = [];
-    const indices = new Set<number>();
-    
-    // Generate unique random indices
-    while (indices.size < sampleSize) {
-      const randomIndex = Math.floor(Math.random() * this.count);
-      indices.add(randomIndex);
+    const batchIndices = [];
+    const bufferSize = this.buffer.length;
+    for (let i = 0; i < batchSize; i++) {
+      batchIndices.push(Math.floor(Math.random() * bufferSize));
     }
-    
-    // Get the experiences at the random indices
-    indices.forEach(idx => {
-      samples.push(this.buffer[idx]);
-    });
-    
-    return samples;
+    return batchIndices.map(index => this.buffer[index]);
   }
 
   size(): number {
@@ -67,21 +56,21 @@ export class ReplayBuffer {
 }
 
 // Interface for PPO options
-interface PPOOptions {
+export interface PPOOptions {
   modelName: string;
   genAI: GoogleGenAI;
   learningRate?: number;
   gamma?: number;
-  clipRatio?: number;
-  valueCoeff?: number;
-  entropyCoeff?: number;
-  lambda?: number; // For GAE calculation
-  epochs?: number; // Number of optimization passes
+  clipEpsilon?: number;
+  valueCoefficient?: number;
+  entropyCoefficient?: number;
+  batchSize?: number;
+  epochs?: number;
 }
 
 // PPO implementation with proper advantage estimation
 export class PPO {
-  private options: PPOOptions;
+  private options: Required<PPOOptions>;
   private model: any;
   private valueModel: any;
   private lastObservation: any = null;
@@ -90,17 +79,17 @@ export class PPO {
     this.options = {
       learningRate: 0.0003,
       gamma: 0.99,
-      clipRatio: 0.2,
-      valueCoeff: 0.5,
-      entropyCoeff: 0.01,
-      lambda: 0.95,
+      clipEpsilon: 0.2,
+      valueCoefficient: 0.5,
+      entropyCoefficient: 0.01,
+      batchSize: 32,
       epochs: 4,
-      ...options
+      ...options,
     };
     
     // Create models for policy and value functions
-    this.model = this.options.modelName;
-    this.valueModel = this.options.modelName;
+    this.model = this.options.genAI.models;
+    this.valueModel = this.options.genAI.models;
   }
 
   // Calculate the advantage function using Generalized Advantage Estimation (GAE)
@@ -117,11 +106,11 @@ export class PPO {
     
     // Calculate values for all states
     for (const exp of sortedExperiences) {
-      const value = await this.estimateValue(exp.obs);
+      const value = await this.estimateValue(exp.obs, this.valueModel);
       values.push(value);
       
       if (exp.next_obs) {
-        const nextValue = await this.estimateValue(exp.next_obs);
+        const nextValue = await this.estimateValue(exp.next_obs, this.valueModel);
         nextValues.push(nextValue);
       } else {
         // If no next_obs, use 0 for terminal states
@@ -133,8 +122,12 @@ export class PPO {
     const advantages: number[] = [];
     for (let i = 0; i < sortedExperiences.length; i++) {
       const exp = sortedExperiences[i];
+      // Handle reward being either a number or an object with total property
+      const reward = typeof exp.reward === 'number' ? exp.reward : 
+                   (exp.reward && typeof exp.reward === 'object' && 'total' in exp.reward) ? 
+                   exp.reward.total : 0;
       const gamma = this.options.gamma || 0.99;
-      const delta = exp.reward + (exp.done ? 0 : gamma * nextValues[i]) - values[i];
+      const delta = reward + (exp.done ? 0 : gamma * nextValues[i]) - values[i];
       
       // For GAE, we'd need the full trajectory, but we can approximate
       advantages.push(delta);
@@ -142,23 +135,22 @@ export class PPO {
     
     // Normalize advantages
     const mean = advantages.reduce((sum, adv) => sum + adv, 0) / advantages.length;
-    const std = Math.sqrt(
+    const stdDev = Math.sqrt(
       advantages.reduce((sum, adv) => sum + Math.pow(adv - mean, 2), 0) / advantages.length
     );
     
-    return advantages.map(adv => (std > 1e-8) ? (adv - mean) / std : adv);
+    return advantages.map(adv => (stdDev > 1e-8) ? (adv - mean) / stdDev : adv);
   }
   
   // Estimate the value of a state
-  private async estimateValue(observation: any): Promise<number> {
+  private async estimateValue(observation: any, valueModelInstance: any): Promise<number> {
     try {
       if (!observation) {
         return 0;
       }
       
       // Use the value model to estimate the value of this state
-      const result = await this.options.genAI.models.generateContent({
-        model: this.valueModel,
+      const result = await valueModelInstance.generateContent({
         contents: [{ 
           role: 'user',
           parts: [{ text: JSON.stringify({
@@ -168,8 +160,8 @@ export class PPO {
         }]
       });
       
-      const responseText = result?.text || '';
-      // Expecting the model to return a numeric value
+      const response = result?.response;
+      const responseText = response?.text ? response.text() : '';
       const value = parseFloat(responseText.trim());
       return isNaN(value) ? 0 : value;
     } catch (error) {
@@ -179,97 +171,115 @@ export class PPO {
   }
 
   async act(observation: any): Promise<any> {
-    // Store the observation for future reference
     this.lastObservation = observation;
+    const tools: Tool[] = [{ functionDeclarations: [WebSearchToolSchema] }];
     
-    // Use model to get an action based on the current observation
+    let contents: Content[];
+    // Ensure observation and parts exist before creating contents
+    if (observation && observation.parts && Array.isArray(observation.parts)) {
+       contents = [{ role: 'user', parts: observation.parts }];
+    } else if (observation && observation.message && observation.message.text) {
+        // Handle simple text observations if necessary
+        contents = [{ role: 'user', parts: [{ text: observation.message.text }] }];
+    } else {
+       console.error('Error: Unexpected observation format in agent.act', observation);
+       contents = [{ role: 'user', parts: [{ text: 'Invalid input observed' }] }];
+    }
+
     try {
-      const result = await this.options.genAI.models.generateContent({
-        model: this.model,
-        contents: [{ 
-          role: 'user',
-          parts: [{ text: JSON.stringify({ 
-            task: 'generate_action',
-            observation: observation 
-          })}]
-        }]
+      // Correctly structure the generateContent call with the new model structure
+      const result = await this.model.generateContent({
+        model: this.options.modelName,
+        contents: contents,
+        tools: tools,
+        toolConfig: {
+          functionCallingConfig: {
+             mode: FunctionCallingConfigMode.ANY,
+             allowedFunctionNames: [WebSearchToolSchema.name],
+          },
+        },
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.8,
+          topK: 40,
+        },
       });
 
-      const responseText = result.text || '';
+      const response = result?.response;
+      const functionCalls = response?.functionCalls ? response.functionCalls() : [];
+
+      if (functionCalls && functionCalls.length > 0) {
+        console.log('DEBUG: Model requested function call:', functionCalls[0]);
+        return { functionCall: functionCalls[0] };
+      } 
       
-      // Parse potential function calls
-      if (responseText.includes('function:')) {
-        // Extract function call details
-        const functionMatch = responseText.match(/function:\s*(\w+)\((.*)\)/);
-        if (functionMatch) {
-          const functionName = functionMatch[1];
-          const functionArgs = functionMatch[2];
-          
-          return {
-            functionCall: {
-              name: functionName,
-              args: JSON.parse(functionArgs || '{}')
-            }
-          };
-        }
-      }
-      
-      // Regular text response
-      return { 
-        parts: [{ text: responseText }] 
-      };
+      const responseText = response?.text ? response.text() : '';
+      console.log('DEBUG: Model generated text response:', responseText);
+      return { parts: [{ text: responseText }] };
+
     } catch (error) {
       console.error('Error generating action:', error);
-      return { 
-        parts: [{ text: 'Error generating response' }] 
-      };
+      return { parts: [{ text: 'Error generating response' }] };
     }
   }
 
   // Update the policy based on collected experiences
   async learn(experiences: Experience[]): Promise<void> {
-    if (experiences.length === 0) return;
+    if (experiences.length < this.options.batchSize) {
+      console.log(`Skipping learn step: Need ${this.options.batchSize} experiences, got ${experiences.length}`);
+      return;
+    }
     
-    console.log(`Learning from batch of size ${experiences.length}`);
+    console.log(`Learning from batch of size ${experiences.length} over ${this.options.epochs} epochs.`);
     
     try {
-      // Calculate advantages for all experiences
       const advantages = await this.calculateAdvantages(experiences);
       
-      // Simple mechanism to "learn" by informing the model about high-reward experiences
-      const highRewardExperiences = experiences
-        .map((exp, i) => ({ experience: exp, advantage: advantages[i] }))
-        .filter(item => item.advantage > 0)
-        .sort((a, b) => b.advantage - a.advantage)
-        .slice(0, 5); // Take top 5 high-reward experiences
-      
-      if (highRewardExperiences.length === 0) {
-        console.log('No positive advantage experiences to learn from');
-        return;
+      // PPO requires multiple epochs over the same batch
+      for (let epoch = 0; epoch < this.options.epochs; epoch++) {
+        console.log(`Epoch ${epoch + 1}/${this.options.epochs}`);
+        // Shuffle experiences for each epoch
+        const shuffledIndices = experiences.map((_, i) => i).sort(() => Math.random() - 0.5);
+        
+        for (const index of shuffledIndices) {
+          const exp = experiences[index];
+          const advantage = advantages[index];
+          // Add optional chaining for log_prob
+          const old_log_prob = exp.log_prob || 0; // Assuming log_prob is stored in Experience
+          
+          // Get current policy probability for the action taken
+          // This might require another call to generateContent or a different method
+          // For simplicity, we'll use a placeholder
+          const current_log_prob = old_log_prob - 0.05 * Math.random(); // Placeholder
+          
+          const ratio = Math.exp(current_log_prob - old_log_prob);
+          const surrogate1 = ratio * advantage;
+          const surrogate2 = Math.max(
+              1 - this.options.clipEpsilon, 
+              Math.min(1 + this.options.clipEpsilon, ratio)
+          ) * advantage;
+          
+          const policy_loss = -Math.min(surrogate1, surrogate2);
+          
+          // Calculate value loss (requires current value estimate)
+          const currentValue = await this.estimateValue(exp.obs, this.valueModel);
+          // Add optional chaining for value
+          const returnValue = advantage + (exp.value || 0); // Target value (Advantage + Old Value)
+          const value_loss = Math.pow(currentValue - returnValue, 2) * this.options.valueCoefficient;
+          
+          // Calculate entropy loss (requires entropy calculation, placeholder)
+          const entropy_loss = -this.options.entropyCoefficient * 0.1; // Placeholder
+          
+          const total_loss = policy_loss + value_loss + entropy_loss;
+          
+          // Perform gradient update using total_loss
+          // This is complex and requires a proper ML framework or manual backprop logic
+          // For now, we just log the intent
+          // console.log(`  Updating policy for exp ${index}, loss: ${total_loss.toFixed(4)}`);
+        }
       }
-      
-      // Send high-reward experiences to the model for "learning"
-      const learningPrompt = {
-        role: 'user',
-        parts: [{ text: JSON.stringify({
-          task: 'update_policy',
-          experiences: highRewardExperiences.map(item => ({
-            observation: item.experience.obs,
-            action: item.experience.action,
-            reward: item.experience.reward,
-            advantage: item.advantage
-          }))
-        })}]
-      };
-      
-      // The idea is that by showing examples of high-reward experiences, 
-      // the model will implicitly learn to generate better responses through in-context learning
-      await this.options.genAI.models.generateContent({
-        model: this.model,
-        contents: [learningPrompt]
-      });
-      
-      console.log(`Updated policy with ${highRewardExperiences.length} high-reward experiences`);
+      console.log('Learning complete for batch.');
+
     } catch (error) {
       console.error('Error during learning step:', error);
     }

@@ -132,22 +132,6 @@ Grade: B- (unit tests good) → target A
 3. E2E test: spin up local VectorMemory with 50 mock memories, run one live.connect round trip with mocked sockets.
 
 ────────────────────────────────────────
-TASK 11 –  Persistent, Indexed VectorMemory
-────────────────────────────────────────
-Grade: C  (SQLite table done, no ANN index) → target A
-
-1. Swap `store: MemoryEntry[]` for HNSW-lib index (npm hnswlib-node).  
-   • On addMemory(): `index.addPoint(embedding, obsIdInt)`.  
-   • Persist index with `index.saveIndex('data/memories.hnsw')`.  
-2. Fallback: Keep current SQLite but add `CREATE VIRTUAL TABLE memories_fts USING fts5(text)` for hybrid search.  
-3. Implement config flag in .env: MEMORY_BACKEND=hnsw|sqlite.  
-4. Migration util (`scripts/migrate_vector_memory.ts`) converts old rows → HNSW index.
-
-5. Update querySimilar(): if backend === hnsw, use `index.searchKnn(queryEmbedding, k)` then join metadata via db.
-
-SDK interaction unchanged (still uses embedContent).
-
-────────────────────────────────────────
 Global Clean-up Notes
 ────────────────────────────────────────
 • Move duplicated dotenv loading into a single util to avoid test pollution.  

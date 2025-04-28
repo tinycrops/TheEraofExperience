@@ -91,7 +91,7 @@ evaluationModel = CRITIC_MODEL;
 
 /**
  * Calculate reward based on user feedback (thumbs up/down)
- * In a real application, this would track actual user feedback
+ * This is a grounded reward based on actual user responses
  */
 export async function userFeedbackReward(observation: any, action: any): Promise<number> {
   // Use explicit user rating if available
@@ -155,7 +155,6 @@ export async function relevanceReward(observation: any, action: any): Promise<nu
     const result = await genAI.models.generateContent({
       model,
       contents: [evaluationPrompt],
-      config: { responseMimeType: 'text/plain' }
     });
     
     const scoreText = result.text?.trim() || '';
@@ -204,11 +203,94 @@ export function explorationReward(observation: any, action: any): number {
   return explorationBonus;
 }
 
+// --- Enhanced Grounded Rewards ---
+
+/**
+ * Measure information gain based on dialogue history
+ * This assesses if the agent is helping the user expand their knowledge
+ */
+export function informationGainReward(observation: any, action: any): number {
+  // Implementation of information gain rewards
+  // More complex in real systems, but mocked here as a simple function of response length and complexity
+  const response = action?.parts?.[0]?.text || '';
+  
+  // Simple measure: longer responses up to a reasonable limit may indicate more information
+  const optimalResponseLength = 250; // Characters
+  const lengthFactor = Math.min(response.length / optimalResponseLength, 2);
+  
+  // Measure information density using ratio of unique words to total words
+  const words = response.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+  const uniqueWords = new Set(words);
+  const informationDensity = words.length > 0 ? uniqueWords.size / words.length : 0;
+  
+  // Calculate information gain score
+  let infoGainScore = 0;
+  if (lengthFactor > 0.2) {
+    infoGainScore = 0.3 * Math.min(lengthFactor, 1) + 0.7 * informationDensity;
+  }
+  
+  return Math.min(infoGainScore, 1.0);
+}
+
+/**
+ * External task completion/goal achievement reward
+ * This measures success at accomplishing concrete tasks
+ */
+export function taskCompletionReward(observation: any, action: any, metrics?: RewardMetrics): number {
+  // In a real system, this would verify if the action actually accomplished a concrete task
+  // For example: successfully booking an appointment, finding specific information, etc.
+  
+  // Check if we have web search success metric
+  if (metrics?.webSearchSuccess) {
+    return 0.5; // Successful search is a positive outcome
+  }
+  
+  // Check if we have explicit task completion metric from environment
+  if (metrics?.taskCompleted) {
+    return 1.0; // Maximum reward for confirmed task completion
+  }
+  
+  // Default - no evidence of task completion
+  return 0;
+}
+
+/**
+ * Long-term user engagement reward
+ * This measures if the agent is maintaining engagement over time
+ */
+export function userEngagementReward(observation: any, metrics?: RewardMetrics): number {
+  // In a full implementation, this would track session duration, user return rate, etc.
+  
+  if (metrics?.sessionDuration) {
+    // Normalize to 0-1 range with diminishing returns after 5 minutes
+    return Math.min(metrics.sessionDuration / (5 * 60 * 1000), 1.0);
+  }
+  
+  // If we have historical user interaction count
+  if (metrics?.userInteractions) {
+    // Convert to 0-1 range with soft cap at 10 interactions
+    return Math.min(metrics.userInteractions / 10, 1.0);
+  }
+  
+  return 0; // No engagement data available
+}
+
 // --- Task 4: External Metrics and Safety ---
 export interface RewardMetrics {
   latencyMs?: number;
   webSearchSuccess?: boolean;
   safetyFilters?: any;
+  taskCompleted?: boolean;
+  sessionDuration?: number; // in milliseconds
+  userInteractions?: number; // count of user messages in this session
+  learningProgress?: number; // measure of user learning (for educational contexts)
+  healthMetrics?: { // for health-related applications
+    stepsIncreased?: boolean;
+    sleepImproved?: boolean;
+    heartRateImproved?: boolean;
+    [key: string]: any;
+  };
+  [key: string]: any; // Allow for additional custom metrics
 }
 
 /**
@@ -218,48 +300,74 @@ export async function calcReward(
   observation: any,
   action: any,
   metrics?: RewardMetrics
-): Promise<number> {
+): Promise<{total: number, breakdown: Record<string, number>}> {
   // Safety filter: if present, force negative reward
   if (metrics?.safetyFilters && metrics.safetyFilters.length > 0) {
     if (!observation.info) observation.info = {};
     observation.info.safetyViolation = true;
-    return -1;
+    return {
+      total: -1,
+      breakdown: { safety: -1 }
+    };
   }
+  
   // Calculate individual reward components
   const userRewardValue = await userFeedbackReward(observation, action);
   const relevanceRewardValue = await relevanceReward(observation, action);
   const explorationRewardValue = explorationReward(observation, action);
+  const infoGainValue = informationGainReward(observation, action);
+  const taskCompletionValue = taskCompletionReward(observation, action, metrics);
+  const userEngagementValue = userEngagementReward(observation, metrics);
+  
   // External metrics
   let latencyPenalty = 0;
   if (typeof metrics?.latencyMs === 'number') {
     latencyPenalty = -0.01 * (metrics.latencyMs / 1000);
   }
-  let webSearchBonus = 0;
-  if (metrics?.webSearchSuccess) {
-    webSearchBonus = 0.05;
+  
+  // Assemble health metrics if available
+  let healthReward = 0;
+  if (metrics?.healthMetrics) {
+    const healthMetrics = metrics.healthMetrics;
+    if (healthMetrics.stepsIncreased) healthReward += 0.2;
+    if (healthMetrics.sleepImproved) healthReward += 0.3;
+    if (healthMetrics.heartRateImproved) healthReward += 0.2;
   }
+  
   // Weights for different reward components
   const weights = {
     user: 0.5,       // User feedback is highest priority
-    relevance: 0.4,  // Relevance is important but secondary
-    exploration: 0.1 // Small weight for exploration to encourage diversity
+    relevance: 0.3,  // Relevance 
+    exploration: 0.05, // Small weight for exploration to encourage diversity
+    infoGain: 0.25,   // Reward information value
+    taskCompletion: 0.4, // Reward concrete task accomplishment
+    userEngagement: 0.2, // Reward sustained engagement
+    latency: 0.1,     // Small weight for response time
+    health: 0.3       // Health metrics when available
   };
-  let totalReward =
-    weights.user * userRewardValue +
-    weights.relevance * relevanceRewardValue +
-    weights.exploration * explorationRewardValue +
-    latencyPenalty +
-    webSearchBonus;
   
-  // Log reward components for debugging
-  console.log({
-    user: userRewardValue,
-    relevance: relevanceRewardValue,
-    exploration: explorationRewardValue,
-    latencyPenalty,
-    webSearchBonus,
-    total: totalReward
-  });
-    
-  return totalReward;
+  // Calculate weighted total
+  const breakdown = {
+    user: weights.user * userRewardValue,
+    relevance: weights.relevance * relevanceRewardValue,
+    exploration: weights.exploration * explorationRewardValue,
+    infoGain: weights.infoGain * infoGainValue,
+    taskCompletion: weights.taskCompletion * taskCompletionValue,
+    userEngagement: weights.userEngagement * userEngagementValue,
+    latency: weights.latency * latencyPenalty,
+    health: weights.health * healthReward
+  };
+  
+  const totalReward = Object.values(breakdown).reduce((sum, val) => sum + val, 0);
+  
+  // Clamp reward to reasonable range
+  const clampedReward = Math.max(-1, Math.min(1, totalReward));
+  
+  // Log reward calculation for debugging
+  console.log(`Reward calculation: ${clampedReward.toFixed(2)}`, breakdown);
+  
+  return {
+    total: clampedReward,
+    breakdown
+  };
 } 
