@@ -1,43 +1,46 @@
 import {VectorMemory, MemoryEntry} from '../src/memory';
+import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 
 // In-memory store for mocking DB
 const inMemoryDB: any[] = [];
 
 // Mock better-sqlite3 to avoid native dependency issues in tests
-jest.mock('better-sqlite3', () => {
-  return jest.fn().mockImplementation(() => ({
-    prepare: jest.fn().mockImplementation((sql) => {
-      if (sql.startsWith('SELECT')) {
-        return {
-          all: jest.fn(() => [...inMemoryDB]),
-        };
-      } else if (sql.startsWith('INSERT') || sql.startsWith('REPLACE')) {
-        return {
-          run: jest.fn((obsId, text, metadata, embedding) => {
-            // Remove any existing entry with the same obsId
-            const idx = inMemoryDB.findIndex(e => e.obsId === obsId);
-            if (idx !== -1) inMemoryDB.splice(idx, 1);
-            inMemoryDB.push({
-              obsId,
-              text,
-              metadata,   // store as string
-              embedding   // store as string
-            });
-          })
-        };
-      }
-      return { all: jest.fn(() => []), run: jest.fn() };
-    }),
-    pragma: jest.fn(),
-    exec: jest.fn()
-  }));
+vi.mock('better-sqlite3', () => {
+  return {
+    default: vi.fn().mockImplementation(() => ({
+      prepare: vi.fn().mockImplementation((sql) => {
+        if (sql.startsWith('SELECT')) {
+          return {
+            all: vi.fn(() => [...inMemoryDB]),
+          };
+        } else if (sql.startsWith('INSERT') || sql.startsWith('REPLACE')) {
+          return {
+            run: vi.fn((obsId, text, metadata, embedding) => {
+              // Remove any existing entry with the same obsId
+              const idx = inMemoryDB.findIndex(e => e.obsId === obsId);
+              if (idx !== -1) inMemoryDB.splice(idx, 1);
+              inMemoryDB.push({
+                obsId,
+                text,
+                metadata,   // store as string
+                embedding   // store as string
+              });
+            })
+          };
+        }
+        return { all: vi.fn(() => []), run: vi.fn() };
+      }),
+      pragma: vi.fn(),
+      exec: vi.fn()
+    }))
+  };
 });
 
-jest.mock('@google/genai', () => {
+vi.mock('@google/genai', () => {
   return {
-    GoogleGenAI: jest.fn().mockImplementation(() => ({
+    GoogleGenAI: vi.fn().mockImplementation(() => ({
       models: {
-        embedContent: jest.fn().mockImplementation(({contents}) => {
+        embedContent: vi.fn().mockImplementation(({contents}) => {
           // Return a fake embedding: [{ values: [length of string, ...] }]
           return Promise.resolve({embeddings: [{values: Array(3).fill(contents.length)}]});
         }),

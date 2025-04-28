@@ -7,6 +7,7 @@ import { runExperientialAgent } from './experiential_agent';
 import * as readline from 'readline';
 import * as dotenv from 'dotenv-flow';
 import * as path from 'path';
+import { persistUserRating } from './reward_functions';
 
 // Load environment variables - explicitly include .env.local
 dotenv.config({
@@ -41,6 +42,14 @@ async function runDemo() {
     // Initialize the experiential agent
     console.log('Initializing experiential agent...');
     const session = await runExperientialAgent();
+    
+    // Try to extract sessionId from session (if available)
+    // Fallback: ask user for sessionId if not present
+    let sessionId: string | undefined = (session && session.sessionId) ? session.sessionId : undefined;
+    if (!sessionId) {
+      sessionId = await askQuestion('Enter sessionId (or leave blank to skip user rating persistence): ');
+      if (!sessionId) sessionId = undefined;
+    }
     
     // Set up a graceful shutdown handler
     process.on('SIGINT', async () => {
@@ -78,15 +87,11 @@ async function runDemo() {
       // Send the user message to the session
       await session.sendClientContent({ text: userInput });
       
-      // Get feedback after agent response
-      const feedback = await askQuestion('\nHow helpful was that response? (1-5, or just press Enter to skip): ');
-      
-      if (feedback && !isNaN(Number(feedback))) {
-        const rating = Number(feedback);
-        if (rating >= 1 && rating <= 5) {
-          console.log(`Thank you for your feedback! (${rating}/5)`);
-          // In a real implementation, we would use this feedback to adjust rewards
-        }
+      // AUTOMATED: Generate random feedback rating (1-5) and persist
+      const rating = Math.floor(Math.random() * 5) + 1;
+      console.log(`(Automated) Feedback: ${rating}/5`);
+      if (sessionId) {
+        persistUserRating(sessionId, rating);
       }
     }
     

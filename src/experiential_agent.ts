@@ -1,6 +1,6 @@
-import { GoogleGenAI, Content, Modality } from '@google/genai';
+import { GoogleGenAI, Content, Modality, Type } from '@google/genai';
 import { ReplayBuffer, PPO } from './rl_core';
-import { calcReward } from './reward_functions';
+import { calcReward, RewardMetrics } from './reward_functions';
 import * as dotenv from 'dotenv-flow';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -44,18 +44,19 @@ export interface Experience {
 }
 
 // Helper function to extract observation from message
-function extractObservation(msg: LiveServerMessage): any {
+function extractObservation(msg: LiveServerMessage, sessionId?: string): any {
   if (!msg.serverContent) {
     return {
       message: { text: '' },
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      sessionId
     };
   }
-
   // Extract relevant information from the message
   return {
     message: msg.serverContent,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    sessionId
   };
 }
 
@@ -111,6 +112,144 @@ async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   throw new Error('All retries failed');
 }
 
+// Exported handler for testability
+export async function handleLiveMessage({
+  msg,
+  session,
+  buffer,
+  agent,
+  sessionId,
+  persistExperience,
+  vectorMemory
+}: {
+  msg: LiveServerMessage,
+  session: LiveSession,
+  buffer: any,
+  agent: any,
+  sessionId: string,
+  persistExperience: (exp: Experience) => Promise<void>,
+  vectorMemory: any
+}) {
+  console.log('DEBUG: Entered onmessage callback', msg);
+  try {
+    console.log('Received message');
+    // --- Task 3: Tool Use ---
+    if (msg.serverContent && msg.serverContent.functionCall) {
+      const { functionCall } = msg.serverContent;
+      if (functionCall.name === 'webSearch') {
+        const args = functionCall.args || {};
+        const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
+        const query = encodeURIComponent(args.query || '');
+        const url = `https://www.googleapis.com/customsearch/v1?q=${query}&key=${GOOGLE_API_KEY}`;
+        console.log('DEBUG: About to call fetch with URL:', url); // Debug log
+        const start = Date.now();
+        const fetchResult = await fetch(url);
+        const latencyMs = Date.now() - start;
+        const webSearchSuccess = fetchResult.status === 200;
+        const resultJson = await fetchResult.json();
+        // Stream back the result (truncate to 8k chars)
+        await session.sendClientContent({
+          parts: [{ text: JSON.stringify(resultJson).slice(0, 8000) }]
+        });
+        // Re-run calcReward after tool result
+        const obs = extractObservation(msg, sessionId);
+        const action = { parts: [{ text: JSON.stringify(resultJson).slice(0, 8000) }] };
+        const metrics: RewardMetrics = { latencyMs, webSearchSuccess };
+        const reward = await calcReward(obs, action, metrics);
+        const experience: Experience = {
+          obs,
+          reward,
+          done: false,
+          next_obs: null,
+          action,
+          sessionId: sessionId,
+          info: { webSearchSuccess, latencyMs }
+        };
+        buffer.add(experience);
+        await persistExperience(experience);
+        return;
+      }
+    }
+    // --- End Task 3: Tool Use ---
+    // Handle file/image modality
+    if (msg.clientContent && msg.clientContent.inlineData) {
+      const { createPartFromUri } = await import('@google/genai');
+      const part = createPartFromUri(
+        msg.clientContent.inlineData.data,
+        msg.clientContent.inlineData.mimeType
+      );
+      // You may want to use this part in further processing or pass to agent.act
+      // For now, just log it
+      console.log('Received inlineData part:', part);
+    }
+    // Extract observation from message (first pillar: streams of experience)
+    const obs = extractObservation(msg, sessionId);
+    // --- Vector Memory Integration ---
+    try {
+      await vectorMemory.addMemory(obs.message.text || '', obs.timestamp, obs.message);
+      const topMemories = await vectorMemory.querySimilar(obs.message.text || '', 5);
+      console.log('Top similar memories:', topMemories.map((m: any) => m.text));
+      // Optionally: pass topMemories to agent.act if agent supports it
+    } catch (memErr) {
+      console.error('VectorMemory error:', memErr);
+    }
+    // --- End Vector Memory Integration ---
+    // Get action from agent
+    const action = await agent.act(obs);
+    // Execute action by sending it to the session (second pillar: autonomous actions)
+    console.log('Sending action');
+    await session.sendClientContent(action);
+    // Calculate reward (third pillar: grounded rewards)
+    let metrics: RewardMetrics = {};
+    // Safety filter: check for safetyFilters in serverContent
+    if (msg.serverContent && msg.serverContent.safetyFilters && msg.serverContent.safetyFilters.length > 0) {
+      metrics.safetyFilters = msg.serverContent.safetyFilters;
+    }
+    const reward = await calcReward(obs, action, metrics);
+    console.log('Calculated reward:', reward);
+    // Create experience object
+    const experience: Experience = {
+      obs,
+      reward,
+      done: false, // For ongoing conversations
+      next_obs: null, // Will be filled in later
+      action: action,
+      sessionId: sessionId,
+      info: {}
+    };
+    // Attach userRating if available
+    if (obs.sessionId) {
+      const userRatingsPath = path.join(process.cwd(), 'data', 'user_ratings', `${obs.sessionId}.json`);
+      if (fs.existsSync(userRatingsPath)) {
+        try {
+          const data = JSON.parse(fs.readFileSync(userRatingsPath, 'utf-8'));
+          if (typeof data.rating === 'number') {
+            if (!experience.info) experience.info = {};
+            experience.info.userRating = data.rating;
+          }
+        } catch {}
+      }
+    }
+    // Attach safetyViolation if present
+    if (metrics.safetyFilters && metrics.safetyFilters.length > 0) {
+      if (!experience.info) experience.info = {};
+      experience.info.safetyViolation = true;
+    }
+    // Add experience to replay buffer
+    buffer.add(experience);
+    // Persist experience to disk
+    await persistExperience(experience);
+    // Periodically update the agent (fourth pillar: planning/reasoning)
+    if (buffer.size() % 32 === 0) {
+      console.log('Learning from batch...');
+      const batch = buffer.sample(128);
+      await agent.learn(batch);
+    }
+  } catch (error) {
+    console.error('Error in message handler:', error);
+  }
+}
+
 // Main function to run the experiential agent
 export async function runExperientialAgent() {
   // Check for API key
@@ -151,85 +290,33 @@ export async function runExperientialAgent() {
     model: modelName,
     config: {
       responseModalities: [Modality.TEXT],
-      // Define tools when needed:
-      // tools: [{
-      //   functionDeclarations: [
-      //     {
-      //       name: 'webSearch',
-      //       description: 'Search the web for information',
-      //       parameters: {
-      //         type: 'object',
-      //         properties: {
-      //           query: {
-      //             type: 'string',
-      //             description: 'The search query'
-      //           }
-      //         },
-      //         required: ['query']
-      //       }
-      //     }
-      //   ]
-      // }]
+      tools: [{
+        functionDeclarations: [
+          {
+            name: 'webSearch',
+            description: 'SERP',
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                query: { type: Type.STRING }
+              },
+              required: ['query']
+            }
+          }
+        ]
+      }]
     },
     callbacks: {
-      // Handle server messages (observations)
       onmessage: async (msg: LiveServerMessage) => {
-        try {
-          console.log('Received message');
-          
-          // Extract observation from message (first pillar: streams of experience)
-          const obs = extractObservation(msg);
-          
-          // Record the observation for later use
-          currentObs = obs;
-          
-          // --- Vector Memory Integration ---
-          try {
-            await vectorMemory.addMemory(obs.message.text || '', obs.timestamp, obs.message);
-            const topMemories = await vectorMemory.querySimilar(obs.message.text || '', 5);
-            console.log('Top similar memories:', topMemories.map(m => m.text));
-            // Optionally: pass topMemories to agent.act if agent supports it
-          } catch (memErr) {
-            console.error('VectorMemory error:', memErr);
-          }
-          // --- End Vector Memory Integration ---
-          
-          // Get action from agent
-          const action = await agent.act(obs);
-          
-          // Execute action by sending it to the session (second pillar: autonomous actions)
-          console.log('Sending action');
-          await session.sendClientContent(action);
-          
-          // Calculate reward (third pillar: grounded rewards)
-          const reward = await calcReward(obs, action);
-          console.log('Calculated reward:', reward);
-          
-          // Create experience object
-          const experience: Experience = {
-            obs,
-            reward,
-            done: false, // For ongoing conversations
-            next_obs: null, // Will be filled in later
-            action: action,
-            sessionId: sessionId
-          };
-          
-          // Add experience to replay buffer
-          buffer.add(experience);
-          
-          // Persist experience to disk
-          await persistExperience(experience);
-          
-          // Periodically update the agent (fourth pillar: planning/reasoning)
-          if (buffer.size() % 32 === 0) {
-            console.log('Learning from batch...');
-            const batch = buffer.sample(128);
-            await agent.learn(batch);
-          }
-        } catch (error) {
-          console.error('Error in message handler:', error);
-        }
+        await handleLiveMessage({
+          msg,
+          session,
+          buffer,
+          agent,
+          sessionId,
+          persistExperience,
+          vectorMemory
+        });
       },
       onopen: () => {
         console.log('Session opened successfully');
@@ -243,6 +330,7 @@ export async function runExperientialAgent() {
     }
   });
 
-  // Return the session for external management
+  // Attach sessionId for demo wiring
+  (session as any).sessionId = sessionId;
   return session;
 } 

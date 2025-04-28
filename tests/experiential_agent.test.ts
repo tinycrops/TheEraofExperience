@@ -1,4 +1,4 @@
-// @ts-nocheck
+import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { Experience } from '../src/experiential_agent';
 import { ReplayBuffer, PPO } from '../src/rl_core';
 import { calcReward } from '../src/reward_functions';
@@ -15,50 +15,77 @@ dotenv.config({
 // Use the real API key from .env.local for mocks
 const apiKey = process.env.GEMINI_API_KEY;
 
-// Mock the GoogleGenAI module
-jest.mock('@google/genai', () => {
+// Mock the GoogleGenAI module and Type enum at the very top
+let onConnectResolve = null;
+
+vi.mock('@google/genai', () => {
+  const sessionSendClientContent = vi.fn();
+  const mockSession = { sendClientContent: sessionSendClientContent, close: vi.fn() };
   return {
-    GoogleGenAI: jest.fn().mockImplementation(() => {
+    GoogleGenAI: vi.fn().mockImplementation(() => {
       return {
         models: {
-          generateContent: jest.fn().mockResolvedValue({
+          generateContent: vi.fn().mockResolvedValue({
             text: '0.75' // Mock score for reward calculation as property
           }),
-          countTokens: jest.fn().mockResolvedValue({ totalTokens: 100 })
+          countTokens: vi.fn().mockResolvedValue({ totalTokens: 100 })
         },
         live: {
-          connect: jest.fn().mockResolvedValue({
-            sendClientContent: jest.fn().mockResolvedValue(undefined),
-            close: jest.fn().mockResolvedValue(undefined)
+          connect: vi.fn().mockImplementation(async ({ callbacks }) => {
+            setImmediate(async () => {
+              await callbacks.onmessage({
+                serverContent: {
+                  functionCall: {
+                    name: 'webSearch',
+                    args: { query: 'test query' }
+                  }
+                }
+              });
+              if (typeof onConnectResolve === 'function') {
+                setImmediate(onConnectResolve);
+              }
+            });
+            return mockSession;
           })
         }
       };
     }),
     Modality: {
       TEXT: 'TEXT'
+    },
+    Type: {
+      OBJECT: 'object',
+      STRING: 'string'
     }
   };
 });
 
+// Mock fetch globally at the top
+(global as any).fetch = vi.fn().mockResolvedValue({
+  json: vi.fn().mockResolvedValue({ result: 'search results' })
+});
+
 // Mock fs module
-jest.mock('fs', () => {
+vi.mock('fs', () => {
   return {
-    existsSync: jest.fn().mockReturnValue(true),
-    mkdirSync: jest.fn(),
-    appendFile: jest.fn((path, data, callback) => callback(null))
+    existsSync: vi.fn().mockReturnValue(true),
+    mkdirSync: vi.fn(),
+    appendFile: vi.fn((path, data, callback) => callback(null))
   };
 });
 
 // Mock better-sqlite3 to avoid native dependency issues in tests
-jest.mock('better-sqlite3', () => {
-  return jest.fn().mockImplementation(() => ({
-    prepare: jest.fn().mockReturnValue({
-      all: jest.fn().mockReturnValue([]),
-      run: jest.fn()
-    }),
-    pragma: jest.fn(),
-    exec: jest.fn()
-  }));
+vi.mock('better-sqlite3', () => {
+  return {
+    default: vi.fn().mockImplementation(() => ({
+      prepare: vi.fn().mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+        run: vi.fn()
+      }),
+      pragma: vi.fn(),
+      exec: vi.fn()
+    }))
+  };
 });
 
 describe('Experiential Agent Components', () => {
@@ -77,10 +104,10 @@ describe('Experiential Agent Components', () => {
       const buffer = new ReplayBuffer(3);
       
       // Add experiences
-      const exp1 = { obs: { value: 1 }, reward: 0.5, done: false };
-      const exp2 = { obs: { value: 2 }, reward: 0.7, done: false };
-      const exp3 = { obs: { value: 3 }, reward: 0.9, done: false };
-      const exp4 = { obs: { value: 4 }, reward: 1.0, done: false };
+      const exp1 = { obs: { value: 1 }, reward: 0.5, done: false, sessionId: 'test' };
+      const exp2 = { obs: { value: 2 }, reward: 0.7, done: false, sessionId: 'test' };
+      const exp3 = { obs: { value: 3 }, reward: 0.9, done: false, sessionId: 'test' };
+      const exp4 = { obs: { value: 4 }, reward: 1.0, done: false, sessionId: 'test' };
       
       buffer.add(exp1);
       expect(buffer.size()).toBe(1);
@@ -104,8 +131,8 @@ describe('Experiential Agent Components', () => {
       const buffer = new ReplayBuffer(5);
       
       // Add consecutive experiences
-      const exp1 = { obs: { value: 1 }, reward: 0.5, done: false };
-      const exp2 = { obs: { value: 2 }, reward: 0.7, done: false };
+      const exp1 = { obs: { value: 1 }, reward: 0.5, done: false, sessionId: 'test' };
+      const exp2 = { obs: { value: 2 }, reward: 0.7, done: false, sessionId: 'test' };
       
       buffer.add(exp1);
       buffer.add(exp2);
@@ -142,7 +169,7 @@ describe('Experiential Agent Components', () => {
   describe('PPO Agent', () => {
     it('should initialize with correct options', async () => {
       // Import the actual GoogleGenAI for typings
-      const { GoogleGenAI } = jest.requireActual('@google/genai');
+      const { GoogleGenAI } = await vi.importActual('@google/genai') as any;
       
       // Create mock genAI client with real API key
       const mockGenAI = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY});
@@ -166,7 +193,7 @@ describe('Experiential Agent Components', () => {
     
     it('should learn from experiences', async () => {
       // Import the actual GoogleGenAI for typings
-      const { GoogleGenAI } = jest.requireActual('@google/genai');
+      const { GoogleGenAI } = await vi.importActual('@google/genai') as any;
       
       // Create mock genAI client with real API key
       const mockGenAI = new GoogleGenAI({apiKey: process.env.GEMINI_API_KEY});
@@ -183,13 +210,15 @@ describe('Experiential Agent Components', () => {
           obs: { message: { text: 'test1' }, timestamp: new Date().toISOString() },
           action: { parts: [{ text: 'response1' }] },
           reward: 0.8,
-          done: false
+          done: false,
+          sessionId: 'test',
         },
         {
           obs: { message: { text: 'test2' }, timestamp: new Date().toISOString() },
           action: { parts: [{ text: 'response2' }] },
           reward: 0.3,
-          done: false
+          done: false,
+          sessionId: 'test',
         }
       ];
       
@@ -201,35 +230,89 @@ describe('Experiential Agent Components', () => {
 
 describe('Experiential Agent Integration', () => {
   it('should include sessionId in Experience and NDJSON log', async () => {
-    // Import the Experience type and persistExperience function
-    const { Experience } = require('../src/experiential_agent');
-    // Create a fake sessionId
-    const sessionId = 'test-session-1234';
-    // Create a sample experience
-    const experience: Experience = {
-      obs: { message: { text: 'hello' }, timestamp: new Date().toISOString() },
-      reward: 1.0,
-      done: false,
-      next_obs: null,
-      action: { parts: [{ text: 'world' }] },
-      sessionId: sessionId
-    };
-    // Mock fs.appendFile to capture the written data
-    const fs = require('fs');
-    let writtenData = '';
-    fs.appendFile.mockImplementation((path, data, cb) => {
-      writtenData = data;
-      cb(null);
+    console.log('DEBUG: Starting sessionId NDJSON log test');
+    try {
+      // Import persistExperience function
+      const { persistExperience } = await import('../src/experiential_agent');
+      // Create a fake sessionId
+      const sessionId = 'test-session-1234';
+      // Create a sample experience
+      const experience = {
+        obs: { message: { text: 'hello' }, timestamp: new Date().toISOString() },
+        reward: 1.0,
+        done: false,
+        next_obs: null,
+        action: { parts: [{ text: 'world' }] },
+        sessionId: sessionId
+      };
+      // Mock fs.appendFile to capture the written data
+      const fs = await import('fs');
+      let writtenData = '';
+      vi.spyOn(fs, 'appendFile').mockImplementation((path, data, cb) => {
+        writtenData = data as string;
+        cb(null);
+      });
+      await persistExperience(experience);
+      console.log('DEBUG: Written NDJSON:', writtenData);
+      // Check that the written NDJSON includes the sessionId
+      expect(writtenData).toContain(sessionId);
+      // Check that the written NDJSON is valid JSON per line
+      const parsed = JSON.parse(writtenData.trim());
+      expect(parsed.sessionId).toBe(sessionId);
+      expect(parsed.obs.message.text).toBe('hello');
+      expect(parsed.action.parts[0].text).toBe('world');
+      console.log('DEBUG: sessionId NDJSON log test passed');
+    } catch (err) {
+      console.error('DEBUG: sessionId NDJSON log test error', err);
+      throw err;
+    }
+  });
+});
+
+describe('Experiential Agent Tool Use', () => {
+  vi.setConfig({ testTimeout: 20000 }); // Increase timeout for this suite
+  it('should handle webSearch functionCall, call fetch, and log result to NDJSON', async () => {
+    console.log('DEBUG: Starting tool use test');
+    const { handleLiveMessage } = await import('../src/experiential_agent');
+    const sessionSendClientContent = vi.fn();
+    const mockSession = { sendClientContent: sessionSendClientContent, close: vi.fn() };
+    // Mock fetch
+    global.fetch = vi.fn().mockResolvedValue({
+      json: vi.fn().mockResolvedValue({ result: 'search results' })
     });
-    // Import persistExperience
-    const { persistExperience } = require('../src/experiential_agent');
-    await persistExperience(experience);
-    // Check that the written NDJSON includes the sessionId
-    expect(writtenData).toContain(sessionId);
-    // Check that the written NDJSON is valid JSON per line
-    const parsed = JSON.parse(writtenData.trim());
-    expect(parsed.sessionId).toBe(sessionId);
-    expect(parsed.obs.message.text).toBe('hello');
-    expect(parsed.action.parts[0].text).toBe('world');
+    // Spy on persistExperience
+    const persistSpy = vi.fn();
+    // Mock buffer and agent
+    const mockBuffer = { add: vi.fn(), size: () => 1, sample: () => [] };
+    const mockAgent = { act: vi.fn().mockResolvedValue({ parts: [{ text: 'agent response' }] }) };
+    const mockVectorMemory = { addMemory: vi.fn(), querySimilar: vi.fn().mockResolvedValue([]) };
+    // Prepare mock message
+    const msg = {
+      serverContent: {
+        functionCall: {
+          name: 'webSearch',
+          args: { query: 'test query' }
+        }
+      }
+    };
+    // Act
+    await handleLiveMessage({
+      msg,
+      session: mockSession,
+      buffer: mockBuffer,
+      agent: mockAgent,
+      sessionId: 'test-session-1234',
+      persistExperience: persistSpy,
+      vectorMemory: mockVectorMemory
+    });
+    // Assert
+    expect(global.fetch).toHaveBeenCalledWith(expect.stringContaining('q=test%20query'));
+    expect(sessionSendClientContent).toHaveBeenCalledWith({
+      parts: [expect.objectContaining({ text: expect.stringContaining('search results') })]
+    });
+    expect(persistSpy).toHaveBeenCalledWith(expect.objectContaining({
+      action: expect.objectContaining({ parts: [expect.objectContaining({ text: expect.stringContaining('search results') })] })
+    }));
+    console.log('DEBUG: tool use test passed');
   });
 }); 

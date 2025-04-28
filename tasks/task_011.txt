@@ -1,0 +1,166 @@
+# Task ID: 11
+# Title: Implement Persistent Storage for VectorMemory using HNSW or SQLite
+# Status: pending
+# Dependencies: None
+# Priority: high
+# Description: Enhance the VectorMemory module to support disk-based persistent storage of embeddings and metadata using either HNSW or SQLite, while maintaining the existing API and ensuring efficient similarity search capabilities.
+# Details:
+Extend the VectorMemory module to store vector embeddings and associated metadata on disk rather than only in memory. This implementation should:
+
+1. Create a new storage backend that uses either:
+   - HNSW (Hierarchical Navigable Small World) for efficient approximate nearest neighbor search
+   - SQLite with appropriate indexing for vector similarity search
+
+2. Maintain the existing API methods:
+   - `addMemory(text, embedding, metadata)` - Should now persist to disk
+   - `querySimilar(embedding, limit)` - Should query from persistent storage
+
+3. Implement a configuration mechanism to specify storage location, index parameters, and other relevant settings
+
+4. Add a migration utility to transfer existing in-memory data to the new persistent storage
+
+5. Ensure thread-safety for concurrent read/write operations
+
+6. Implement proper resource management (connection pooling if using SQLite, index loading/unloading for HNSW)
+
+7. Add performance optimizations:
+   - Caching frequently accessed vectors
+   - Batch operations for bulk imports
+   - Background indexing for large datasets
+
+8. Handle edge cases:
+   - Graceful recovery from corrupted storage
+   - Automatic reindexing when needed
+   - Versioning for future compatibility
+
+Dependencies to consider:
+- For HNSW: hnswlib, faiss, or similar libraries
+- For SQLite: sqlite3 with appropriate extensions for vector operations
+
+Performance requirements:
+- Should support at least 1M vectors with sub-second query times
+- Minimal memory footprint regardless of dataset size
+
+# Test Strategy:
+Testing should verify both functional correctness and performance characteristics:
+
+1. Unit Tests:
+   - Test persistence by adding vectors, restarting the service, and verifying they can be retrieved
+   - Verify that metadata is correctly stored and retrieved with vectors
+   - Test edge cases: empty database, very large vectors, malformed inputs
+   - Verify API compatibility with existing code that uses VectorMemory
+
+2. Integration Tests:
+   - Test the migration utility with various dataset sizes
+   - Verify that existing application flows work with the new storage backend
+
+3. Performance Tests:
+   - Benchmark query times for different dataset sizes (10K, 100K, 1M vectors)
+   - Measure memory usage during operation
+   - Test concurrent read/write operations and verify correctness
+   - Compare performance between HNSW and SQLite implementations
+
+4. Stress Tests:
+   - Test with very large datasets to verify scaling capabilities
+   - Simulate disk failures or corruption and verify recovery
+
+5. Specific Test Cases:
+   - Add 1000 vectors, restart, verify all are retrievable
+   - Perform similarity search and compare results with in-memory implementation
+   - Verify that updates to existing vectors are correctly persisted
+   - Test with various embedding dimensions (128, 384, 768, 1536)
+   - Verify that deleting vectors removes them from persistent storage
+
+# Subtasks:
+## 1. Design and implement the persistent storage backend interface [pending]
+### Dependencies: None
+### Description: Create a storage abstraction layer that defines the interface for persistent vector storage, with initial implementations for both HNSW and SQLite backends.
+### Details:
+1. Create a `VectorStorageBackend` abstract class/interface with methods for adding, querying, and managing vector data.
+2. Implement the HNSW backend using hnswlib:
+   - Create wrapper for index creation, saving, and loading
+   - Implement vector insertion and similarity search
+   - Add configuration options for index parameters (M, ef_construction)
+3. Implement the SQLite backend:
+   - Design schema for storing vectors and metadata
+   - Create indexes for efficient retrieval
+   - Implement vector similarity calculations
+4. Add configuration mechanism for storage location and parameters
+5. Write unit tests for both implementations with small test datasets
+6. Test performance characteristics of both backends
+7. Document the interface and implementation details
+
+Testing approach: Create unit tests that verify correct storage and retrieval of vectors, including edge cases like empty vectors or large datasets. Benchmark query performance.
+
+## 2. Extend VectorMemory to use persistent storage [pending]
+### Dependencies: 11.1
+### Description: Modify the existing VectorMemory module to use the new persistent storage backend while maintaining the current API.
+### Details:
+1. Refactor VectorMemory to use the storage backend interface:
+   - Update constructor to accept storage backend configuration
+   - Modify addMemory() to persist data through the backend
+   - Update querySimilar() to retrieve from persistent storage
+2. Implement proper resource management:
+   - Add initialization and cleanup methods
+   - Handle connection pooling for SQLite backend
+   - Implement proper loading/unloading for HNSW index
+3. Add thread-safety mechanisms:
+   - Implement read/write locks for concurrent operations
+   - Ensure atomic operations for critical sections
+4. Implement caching layer for frequently accessed vectors
+5. Add batch operation support for bulk imports
+6. Write integration tests that verify the full VectorMemory functionality
+7. Ensure backward compatibility with existing code
+
+Testing approach: Create integration tests that verify the VectorMemory maintains its API contract while using persistent storage. Test concurrent operations to verify thread safety.
+
+## 3. Implement migration utility and data management features [pending]
+### Dependencies: 11.1, 11.2
+### Description: Create utilities to migrate existing in-memory data to persistent storage and implement advanced data management features.
+### Details:
+1. Implement migration utility:
+   - Create function to export in-memory vectors to persistent storage
+   - Add progress reporting for large migrations
+   - Implement validation to ensure data integrity after migration
+2. Add data management features:
+   - Implement methods to list, filter, and delete stored vectors
+   - Add support for metadata-based queries
+   - Create backup and restore functionality
+3. Implement error handling and recovery:
+   - Add detection for corrupted storage
+   - Implement automatic reindexing when needed
+   - Create repair utilities for damaged indexes
+4. Add versioning system for storage format:
+   - Include version information in stored data
+   - Implement upgrade path for future changes
+5. Write tests for migration and management features
+6. Document all new functionality
+
+Testing approach: Create tests that verify successful migration of data, proper error handling, and recovery from simulated corruption. Test backup/restore functionality with various dataset sizes.
+
+## 4. Optimize performance and implement advanced features [pending]
+### Dependencies: 11.2, 11.3
+### Description: Optimize the persistent storage implementation for performance at scale and add advanced features for production use.
+### Details:
+1. Implement performance optimizations:
+   - Add configurable caching strategies (LRU, time-based, etc.)
+   - Implement background indexing for large datasets
+   - Add query result caching
+   - Optimize batch operations for bulk imports
+2. Add monitoring and diagnostics:
+   - Implement performance metrics collection
+   - Add logging for important operations
+   - Create diagnostic tools for troubleshooting
+3. Implement advanced query features:
+   - Add filtering by metadata during similarity search
+   - Support for hybrid search (combining vector and metadata filters)
+   - Implement pagination for large result sets
+4. Scale testing and optimization:
+   - Test with 1M+ vectors to verify performance requirements
+   - Optimize memory usage for large datasets
+   - Tune configuration parameters for optimal performance
+5. Create comprehensive documentation and usage examples
+6. Implement benchmarking suite for ongoing performance testing
+
+Testing approach: Create benchmark tests that verify performance with large datasets (1M+ vectors). Test memory usage under various conditions. Verify that query times remain under the sub-second requirement even at scale.
+
