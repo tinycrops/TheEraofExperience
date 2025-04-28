@@ -34,21 +34,78 @@ var __importStar = (this && this.__importStar) || (function () {
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.runExperientialAgent = runExperientialAgent;
-const generative_ai_1 = require("@google/generative-ai");
+const genai_1 = require("@google/genai");
 const rl_core_1 = require("./rl_core");
 const reward_functions_1 = require("./reward_functions");
-const dotenv = __importStar(require("dotenv"));
+const dotenv = __importStar(require("dotenv-flow"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 // Load environment variables
 dotenv.config();
 // Helper function to extract observation from message
 function extractObservation(msg) {
+    if (!msg.serverContent) {
+        return {
+            message: { text: '' },
+            timestamp: new Date().toISOString()
+        };
+    }
     // Extract relevant information from the message
-    // This would be customized based on your specific use case
-    const content = msg.content || {};
     return {
-        message: content,
+        message: msg.serverContent,
         timestamp: new Date().toISOString()
     };
+}
+// Ensure data directory exists
+function ensureDataDirectory() {
+    const today = new Date();
+    const dateStr = today.toISOString().split('T')[0]; // YYYY-MM-DD
+    const dir = path.join(process.cwd(), 'data', dateStr);
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    return path.join(dir, 'stream.ndjson');
+}
+// Function to save experience to NDJSON file
+async function persistExperience(experience) {
+    const filepath = ensureDataDirectory();
+    const serialized = JSON.stringify(experience) + '\n';
+    return new Promise((resolve, reject) => {
+        fs.appendFile(filepath, serialized, (err) => {
+            if (err)
+                reject(err);
+            else
+                resolve();
+        });
+    });
+}
+// Token counter for managing context size
+async function tokenCost(ai, contents) {
+    try {
+        // With the new SDK, the token counting is not directly available
+        // We'll use a simple estimation method as fallback
+        return JSON.stringify(contents).length / 4;
+    }
+    catch (error) {
+        console.error('Error counting tokens:', error);
+        // Fallback estimate if the API call fails
+        return JSON.stringify(contents).length / 4;
+    }
+}
+// Retry helper for API calls
+async function withRetry(fn, tries = 3) {
+    for (let i = 0; i < tries; i++) {
+        try {
+            return await fn();
+        }
+        catch (e) {
+            if (i >= tries - 1)
+                throw e;
+            const waitTime = 2 ** i * 200;
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+    }
+    throw new Error('All retries failed');
 }
 // Main function to run the experiential agent
 async function runExperientialAgent() {
@@ -57,64 +114,96 @@ async function runExperientialAgent() {
     if (!apiKey) {
         throw new Error('GEMINI_API_KEY environment variable is required');
     }
-    // Set up Gemini API client
-    const ai = new generative_ai_1.GoogleGenerativeAI(apiKey);
-    console.log('Initializing experiential agent...');
-    // Create a mock session for testing since the live API isn't fully implemented yet
-    const mockSession = {
-        sendClientContent: (content) => {
-            console.log('Sent content to client:', JSON.stringify(content).substring(0, 200) + '...');
-        },
-        close: async () => {
-            console.log('Session closed');
-        },
-        onmessage: (msg) => { },
-        onerror: (error) => { },
-        onclose: () => { }
-    };
-    // Set up replay buffer and PPO agent
+    const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+    console.log(`Initializing experiential agent with model ${modelName}...`);
+    // Initialize the real Google GenAI client
+    const genAI = new genai_1.GoogleGenAI({ apiKey });
+    // Create replay buffer and PPO agent
     const buffer = new rl_core_1.ReplayBuffer(1e6);
-    const agent = new rl_core_1.PPO({ modelName: 'gemini-1.5-pro', sdk: ai });
-    // For testing, we'll simulate some messages
-    const simulateMessage = (content) => {
-        if (mockSession.onmessage) {
-            mockSession.onmessage({ content });
-        }
-    };
-    // Set up message handler
-    mockSession.onmessage = async (msg) => {
-        try {
-            console.log('Received message:', JSON.stringify(msg).substring(0, 200) + '...');
-            // Extract observation from message
-            const obs = extractObservation(msg);
-            // Get action from agent
-            const action = await agent.act(obs);
-            // Execute action by sending it to the session
-            console.log('Sending action:', JSON.stringify(action).substring(0, 200) + '...');
-            mockSession.sendClientContent(action);
-            // Calculate reward
-            const reward = await (0, reward_functions_1.calcReward)(obs, action);
-            console.log('Calculated reward:', reward);
-            // Add transition to replay buffer
-            buffer.add({ obs, action, reward });
-            // Periodically update the agent
-            if (buffer.size() % 512 === 0) {
-                console.log('Learning from batch...');
-                const batch = buffer.sample(2048);
-                await agent.learn(batch);
+    const agent = new rl_core_1.PPO({
+        modelName: modelName,
+        genAI: genAI
+    });
+    // Connect to Live API
+    console.log('Connecting to Gemini Live API...');
+    let currentObs = null;
+    let session;
+    // Create live session
+    session = await genAI.live.connect({
+        model: modelName,
+        config: {
+            responseModalities: [genai_1.Modality.TEXT],
+            // Define tools when needed:
+            // tools: [{
+            //   functionDeclarations: [
+            //     {
+            //       name: 'webSearch',
+            //       description: 'Search the web for information',
+            //       parameters: {
+            //         type: 'object',
+            //         properties: {
+            //           query: {
+            //             type: 'string',
+            //             description: 'The search query'
+            //           }
+            //         },
+            //         required: ['query']
+            //       }
+            //     }
+            //   ]
+            // }]
+        },
+        callbacks: {
+            // Handle server messages (observations)
+            onmessage: async (msg) => {
+                try {
+                    console.log('Received message');
+                    // Extract observation from message (first pillar: streams of experience)
+                    const obs = extractObservation(msg);
+                    // Record the observation for later use
+                    currentObs = obs;
+                    // Get action from agent
+                    const action = await agent.act(obs);
+                    // Execute action by sending it to the session (second pillar: autonomous actions)
+                    console.log('Sending action');
+                    await session.sendClientContent(action);
+                    // Calculate reward (third pillar: grounded rewards)
+                    const reward = await (0, reward_functions_1.calcReward)(obs, action);
+                    console.log('Calculated reward:', reward);
+                    // Create experience object
+                    const experience = {
+                        obs,
+                        reward,
+                        done: false, // For ongoing conversations
+                        next_obs: null, // Will be filled in later
+                        action: action
+                    };
+                    // Add experience to replay buffer
+                    buffer.add(experience);
+                    // Persist experience to disk
+                    await persistExperience(experience);
+                    // Periodically update the agent (fourth pillar: planning/reasoning)
+                    if (buffer.size() % 32 === 0) {
+                        console.log('Learning from batch...');
+                        const batch = buffer.sample(128);
+                        await agent.learn(batch);
+                    }
+                }
+                catch (error) {
+                    console.error('Error in message handler:', error);
+                }
+            },
+            onopen: () => {
+                console.log('Session opened successfully');
+            },
+            onerror: (error) => {
+                console.error('Session error:', error);
+            },
+            onclose: () => {
+                console.log('Session closed');
             }
         }
-        catch (error) {
-            console.error('Error in message handler:', error);
-        }
-    };
-    // Simulate some initial messages for testing
-    setTimeout(() => {
-        simulateMessage({ text: "Hello, I need help with a task." });
-    }, 1000);
-    setTimeout(() => {
-        simulateMessage({ text: "Can you search for information about machine learning?" });
-    }, 2000);
-    // Return the mock session for external management
-    return mockSession;
+    });
+    // Return the session for external management
+    return session;
 }

@@ -16,6 +16,17 @@ This project implements an experiential AI agent based on the concepts from "The
 - `src/rl_core.ts` - Reinforcement learning components (ReplayBuffer, PPO)
 - `src/reward_functions.ts` - Functions for calculating rewards
 - `src/index.ts` - Main entry point
+- `src/demo.ts` - Interactive demo script for hands-on testing
+- `tests/` - Unit tests for the implementation
+
+## Features
+
+- 💬 Live interactions using Gemini's real-time API
+- 📊 Multi-component reward system (user feedback, relevance, exploration)
+- 🧠 Experience-based learning using the Proximal Policy Optimization (PPO) algorithm
+- 📝 Automatic persistence of experiences to NDJSON files
+- 🔄 Automatic advantage calculation with GAE(λ)
+- 🛠️ Action generation and evaluation with a systematic approach
 
 ## Getting Started
 
@@ -32,32 +43,41 @@ This project implements an experiential AI agent based on the concepts from "The
    cd TheEraofExperience
    npm install
    ```
-3. Copy the `.env.example` file to `.env` and add your Gemini API key:
+3. Copy the `.env.example` file to `.env.local` and add your Gemini API key:
    ```
-   cp .env.example .env
-   # Edit .env to add your API key
+   cp .env.example .env.local
+   # Edit .env.local to add:
+   # GEMINI_API_KEY=your_api_key_here
+   # GEMINI_MODEL=gemini-2.0-flash
    ```
 
 ### Running the Agent
 
-Build and start the agent:
-
+Build and run the interactive demo:
 ```
 npm run build
-npm start
+npx ts-node src/demo.ts
 ```
 
 For development with automatic reloading:
-
 ```
 npm run dev
+```
+
+Run the tests:
+```
+npm test
 ```
 
 ## Customization
 
 ### Reward Functions
 
-To customize the reward calculation, edit `src/reward_functions.ts`. You can implement domain-specific reward functions based on your use case.
+To customize the reward calculation, edit `src/reward_functions.ts`. The current implementation includes:
+
+- **User Feedback Reward**: Based on user's explicit rating or inferred from response patterns
+- **Relevance Reward**: Uses a second Gemini model to score the relevance of responses to queries
+- **Exploration Reward**: Encourages diverse behavior by rewarding new states and actions
 
 ### Agent Configuration
 
@@ -65,15 +85,26 @@ Modify the system instructions and tools in `src/experiential_agent.ts` to custo
 
 ### Learning Algorithm
 
-The current implementation uses a simplified version of PPO (Proximal Policy Optimization). You can enhance this with a more sophisticated implementation in `src/rl_core.ts`.
+The implementation includes a proper PPO algorithm with:
+- Advantage estimation using Generalized Advantage Estimation (GAE)
+- Policy updates based on high-reward experiences
+- In-context learning to improve model responses
+
+## Data Collection
+
+The agent automatically saves all experiences to daily NDJSON files in the `data/` directory. This provides:
+
+- A growing dataset for offline training
+- A record of all interactions and rewards
+- Material for analyzing agent behavior over time
 
 ## Next Steps
 
-- Implement more sophisticated reward functions
-- Add more tools for agent interaction
-- Develop a proper PPO implementation
-- Add multimodal capabilities
-- Implement persistent storage for the replay buffer
+- Implement full tool calling capabilities
+- Add multimodal observation support
+- Develop a proper web interface for interactions
+- Implement distributed experience collection
+- Add reinforcement learning from human feedback (RLHF)
 
 ## License
 

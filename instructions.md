@@ -1,138 +1,154 @@
-────────────────────────────────────────
-2. ARCHITECTURAL MAPPING (Paper → SDK)
-────────────────────────────────────────
-Paper concept                SDK primitive (sample file)
-───────────────────────────  ───────────────────────────────────────────────
-Streams of experience         Live API (live_client_content.ts / live_server.ts)
-Autonomous actions            • Function calling (generate_content_with_function_calling.ts)
-• Tool execution / code-exec (generate_content_with_code_execution.ts)
-• API / browser control via “actions” in your own code
-Grounded observations         • Inline parts (images/video/audio)
-• File upload & caches (generate_content_with_file_upload.ts, caches.ts)
-Grounded rewards              Your domain specific signal → pass to RL loop
-Planning / reasoning          • Model generated CoT + tool use
-• World-model roll-outs using generateContentStream()
-Continual learning            Persist chat history, feedback & rewards; retrain or prompt-steer
+Primary goal: rapidly mature the current PoC into a self-improving experiential agent that embodies the four pillars in Silver & Sutton’s “Era of Experience” paper while using the Google Gen AI TypeScript SDK as the only model interface.
 
 ────────────────────────────────────────
-3. BUILD A MINIMUM “EXPERIENTIAL” LOOP
+
+Local bootstrap ──────────────────────────────────────── 1.1 Node & tooling • Use Node 18 LTS. • npm i -g pnpm (faster mono-repo iterations) then pnpm i. • pnpm test --watch for TDD loop.
+1.2 Environment
+ . env keys expected:
+ - GEMINI_API_KEY – for Gemini Dev API
+ - GOOGLE_CLOUD_PROJECT / LOCATION – for Vertex path when you want to switch.
+Use .env.dev, .env.prod for quick context switches; dotenv-flow already installed.
+
+1.3 Project entry‐points
+src/index.ts           → CLI bootstrap, graceful shut-down
+src/experiential_agent.ts
+src/rl_core.ts          → PPO, ReplayBuffer (stub)
+src/reward_functions.ts → reward shaping
+tests/*                 → Jest CI guard rail
+
+Immediate TODO list (highest ROE^1 first)
 ────────────────────────────────────────
-Below is a skeleton of an always-on experiential agent that
+T-#  | Title                                   | Rough Effort
+---- | --------------------------------------- | ------------
+2-1  | Replace mock Live session with real ai.live.connect stream. Use gemini-2.0-flash-live-001 by default.     | S – 1 day
+2-2  | Scrap the mock SDK wrapper; instantiate a real GoogleGenAI once and DI it everywhere.                      | S
+2-3  | Introduce a thin “Experience” interface: {obs, reward, done} so we can later swap in other envs.           | S
+2-4  | Flesh out ReplayBuffer to include next_obs, done, info. Add ring-buffer indices for O(1) push/pull.   | M
+2-5  | Finish PPO: advantage calc, GAE(λ), clipping, value loss. Use CPU ops first; we can off-load to TFJS later.  | M-L
+2-6  | Reward v0: use user “thumbs-up/down” + synthetic relevance (Gemini evaluators) + random exploration bonus.    | S
+2-7  | Add persistence: dump every transition to /data/YYYY-MM-DD/stream.ndjson.                                   | S
+2-8  | Write e2e Jest that spins an in-process Live session with stubbed server, validates one PPO update.           | M
+2-9  | Telemetry: OpenTelemetry exporter; log latency, token counts, reward stats.                                   | S
+2-10 | Docs: update README + generate typedoc artefacts on build.                                                   | S
+^1 ROE = “Return on Experiment”
 
-receives events, 2) decides an action, 3) executes, 4) evaluates reward,
-stores the transition, 6) (optionally) fine-tunes itself.
-// experiental_agent.ts
-import {GoogleGenAI, LiveServerMessage, Modality} from '@google/genai';
-import {ReplayBuffer, PPO} from './rl_core';     // <-- roll your own or plug in RLlib
-import {calcReward} from './reward_functions';  // <-- domain-specific
+How to use the Google Gen AI SDK primitives
+────────────────────────────────────────
+3.1 Streams of Experience
 
-const opts = process.env.GOOGLE_GENAI_USE_VERTEXAI
-  ? {vertexai: true, project: process.env.GOOGLE_CLOUD_PROJECT,
-     location: process.env.GOOGLE_CLOUD_LOCATION}
-  : {vertexai: false, apiKey: process.env.GEMINI_API_KEY};
-const ai = new GoogleGenAI(opts);
-
-// 1. Connect the long-running stream
 const session = await ai.live.connect({
   model: 'gemini-2.0-flash-live-001',
-  config: {responseModalities: [Modality.TEXT]},
+  config: {responseModalities:[Modality.TEXT]},
+  callbacks: {onmessage, onopen, onerror, onclose}
 });
+Pipe every LiveServerMessage into extractObservation.
 
-const buffer = new ReplayBuffer(1e6);
-const agent = new PPO({modelName: 'gemini-2.0-flash', sdk: ai});
+3.2 Autonomous actions
+Actions are produced by PPO as one of:
+A) Plain natural-language (fast iteration).
+B) Structured tool call:
 
-session.onmessage = async (msg: LiveServerMessage) => {
-  const obs = extractObservation(msg);          // your featuriser
-  const action = await agent.act(obs);          // sample policy
-  session.sendClientContent({turns: action});   // 2. execute
-  const reward = await calcReward(obs, action); // 3. grounded signal
-  buffer.add({obs, action, reward});
-  if (buffer.size() % 512 === 0) {
-    const batch = buffer.sample(2048);
-    await agent.learn(batch);                   // 4. policy/value update
-  }
-};
-Pieces you copy-paste from the samples:
+config: {tools:[{functionDeclarations:[{name:'webSearch',parameters:{…}}]}]}
+If response.functionCalls appears, route to the corresponding executor (in /src/tools/ you’ll create).
 
-• Connection & streaming → live_client_content.ts
-• Function/Tool definitions → generate_content_with_function_calling.ts
-• Safety settings → generate_content_with_safety_settings.ts
-• Code execution wrapper → generate_content_with_code_execution.ts
+3.3 Grounded observations
+Images/CSVs use files.upload once then createPartFromUri().
+Telemetry sensors attach as inlineData parts so the model can “see” context.
 
-────────────────────────────────────────
-4. DEFINING “ACTIONS” FOR THE AGENT
-────────────────────────────────────────
-Option A – Pure text commands to a downstream controller (simple).
+3.4 Grounded rewards
+Keep reward calc outside the model. reward_functions.ts should:
+• Pull live metrics (HTTP, database, etc.)
+• Combine with last user feedback and intrinsic bonus.
+Return a single scalar.
 
-Option B – Structured function calls
+3.5 Planning / reasoning
+For long-horizon tasks call the same Gemini model in “planner” mode:
 
-const tools = [{
-  functionDeclarations: [{
-    name: 'click',
-    parameters: { type: Type.OBJECT,
-      properties: { selector:{type:Type.STRING} }, required:['selector'] }
-  }, {...}] }];
-Send tools in the config block; model will return response.functionCalls.
+await ai.models.generateContent({
+  model:'gemini-2.0-pro',
+  contents:[ systemPrompt, currentStateText ],
+  config:{temperature:0.1,maxOutputTokens:4096}
+});
+Run roll-outs offline; store into buffer as “imagined” transitions with lower weight.
 
-Option C – Arbitrary code; enable the internal sandbox
+Folder / module plan
+────────────────────────────────────────
+src/
+├─ agent/                → policy + value nets
+│   ├─ ppo.ts
+│   └─ world_model.ts    (future)
+├─ env/                  → wrappers around Live, CLI, Simulators
+│   ├─ live_env.ts
+│   └─ mock_env.ts
+├─ reward/               → reward sources & aggregation
+├─ tools/                → real-world action executors (search, db, browser)
+├─ data/                 → streamed NDJSON & sqlite index
+└─ util/                 → logging, token_count, retry, metrics
 
-config: { tools:[{codeExecution:{}}] }
+Experimentation workflow
 ────────────────────────────────────────
-5. HANDLING MULTIMODAL OBSERVATIONS
-────────────────────────────────────────
-• Images from cameras/screen → push as inlineData parts.
-• PDFs/CSVs/large blobs → upload once (files.upload) then reference with
-createPartFromUri(uri,mime) in every prompt; cache heavy assets via ai.caches.create.
+Step 0  pnpm dev – start hot-reload loop
+Step 1  Build a new reward feature → add Jest, run pnpm test
+Step 2  Spin up a 5-minute live session with npm run sandbox, watch Grafana dashboard
+Step 3  If avg reward ↑ by ≥15 % over baseline, commit behind feature flag.
+Step 4  Nightly cron runs 1-hour session, dumps dataset; compare AUC curves.
 
+Coding guidelines specific to SDK
 ────────────────────────────────────────
-6. GROUNDING AND COMPUTING REWARDS
-────────────────────────────────────────
-Your reward function can mix:
+• Always call countTokens before sending history >2 K tokens.
+• Use AbortController to kill any streaming response after 30 s idle.
+• Wrap SDK calls with exponential back-off on 429, 5xx.
+• Use HarmBlockMethod.BLOCK_NONE in dev; restore policy settings for prod.
 
-Real-world telemetry (heart-rate, click-thru, latency, $$, …)
-User feedback (stars, thumbs-up)
-Model-based heuristics (log-prob, toxicity score)
-Remember: keep the reward outside the model; the SDK only needs the value.
+Safety knobs (even if security ≠ concern)
+────────────────────────────────────────
+Add .env boolean DEV_UNSAFE=true; if false enforce:
 
-────────────────────────────────────────
-7. PERSISTING THE STREAM
-────────────────────────────────────────
-The SDK gives you raw LiveServerMessages; dump them to your data-lake
-(GCS, BigQuery, S3, etc.) together with actions + rewards.
-That dataset is the substrate for offline RL or future supervised fine-tuning.
+config:{safetySettings:[{category:'HARM_CATEGORY_DANGEROUS',threshold:'BLOCK_SOME'}]}
+Helps avoid model returning disallowed function calls in production.
 
+8. Longer-term roadmap
 ────────────────────────────────────────
-8. ITERATING ON THE AGENT
-────────────────────────────────────────
-• PROMPT LEVEL:  rapid iteration – edit systemInstruction + tool config.
-• POLICY LEVEL:  replace PPO with your RL algorithm of choice.
-• MODEL LEVEL:   periodically fine-tune on accumulated (obs, action) pairs with high reward
-using Vertex Advantage-Custom or the Gemini fine-tune endpoint.
+Q2
+• Swap PPO for R2D2 with prioritized replay to leverage long sequences.
+• Fine-tune Gemini via Vertex-Tuning on high-reward trajectories.
+• Add multimodal perception; pipe webcam frames every N seconds.
+• Introduce hierarchical agent: top-level planner (Gemini), low-level controller (RL).
 
-────────────────────────────────────────
-9. USEFUL COMMANDS DURING DEV
-────────────────────────────────────────
-Count tokens before sending:
+Q3
+• Persistent memory: vector-store of high-value snippets via embedContent.
+• Integrate Veo video generation for “idea > storyboard > video” workflow.
+• Run on-device policy net (WebGPU) for low-latency reflexes.
 
-await ai.models.countTokens({model:'gemini-2.0-flash', contents: prompt});
-Abort runaway streams:
+9. Reference code in sdk-samples to borrow
+────────────────────────────────────────
+Sample file                              What to re-use
 
-const ctrl = new AbortController();
-ai.models.generateContentStream({... , config:{abortSignal:ctrl.signal}});
-ctrl.abort();
-────────────────────────────────────────
-10. PRODUCTION CHECKLIST
-────────────────────────────────────────
-☑ Wrap every generateContent* call with retry/back-off logic
-☑ Enforce safety settings server-side (HarmBlockMethod.SEVERITY ...)
-☑ Log full request/response for model-cards & red-team review
-☑ Gate high-impact actions behind a human-in-the-loop until confidence > X
-☑ Implement “kill-switch” by cancelling live session & revoking key
+sdk-samples/live_client_content.ts       Live connection scaffolding
+sdk-samples/generate_content_with_code_execution.ts  Built-in Python sandbox
+sdk-samples/generate_content_with_function_calling.ts Function declaration format
+sdk-samples/generate_content_with_file_upload.ts      File upload + polling
+sdk-samples/generate_content_streaming.ts             Iterative chunk handling
 
+10. Quick snippets
 ────────────────────────────────────────
-11. NEXT STEPS
+Token counter
+
+export async function tokenCost(contents){ 
+  const res = await ai.models.countTokens({model:'gemini-2.0-flash',contents});
+  return res.totalTokens;
+}
+Retry helper
+
+export async function withRetry(fn, tries=3){
+  for(let i=0;;i++){try{return await fn();}catch(e){if(i>=tries)throw e;await wait(2**i*200);}}
+}
+11. Deliverables cadence
 ────────────────────────────────────────
-• Flesh out domain-specific reward and observation schemas.
-• Move the policy/value nets outside of Gemini for local training if you need sub-token actions.
-• Explore hierarchy: low-level PPO, high-level planning with function-calling Gemini.
-• Contribute back – PRs extending sdk-samples/* with RL loops are welcome.
+• Daily: short experiment log in /logs/YYYY-MM-DD.md – hypothesis, diff, reward delta.
+• Weekly: PR with green Jest, npm run lint, updated docs.
+• Monthly: “Era-scorecard” – table showing progress on each of the four paper pillars.
+
+Kick off by executing tasks 2-1 → 2-4; ping me (the human operator) when Live streaming PPO is learning non-zero reward so we can iterate on richer environments.
+
+Happy hacking & let the agent grow through its own experience!
