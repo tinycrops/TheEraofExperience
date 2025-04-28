@@ -1,0 +1,11 @@
+# Task ID: 5
+# Title: Implement Nightly Summarization Job
+# Status: pending
+# Dependencies: 2
+# Priority: medium
+# Description: Create a process to summarize daily experiences and store them efficiently.
+# Details:
+Develop a script that: 1) Runs on a daily schedule, 2) Chunks the previous day's NDJSON logs, 3) Uses generateContentStream to create summaries, 4) Writes summaries to daily_summary.md files, 5) Uploads summaries to cold storage using files.upload, 6) Maintains an index of available summaries. Include proper error handling and logging for this background process.
+
+# Test Strategy:
+Test the summarization with sample NDJSON files. Verify the chunking logic works with various log sizes and the summaries are properly formatted and stored.

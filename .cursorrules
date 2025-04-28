@@ -2,6 +2,6 @@
 model = 'gemini-2.0-flash'
 GEMINI_API_KEY api keys are in .env.local
 we are using the Gemini API (npm i @google/genai) and NOT THE VERTEX API
-the 
 
-YOU MUST TEST ALL CHANGES FOR ERRORS BEFORE MOVING ON TO THE NEXT FEATURE IMPLEMENTATION
+don't ask for permission before fixing changes
+you must think like a self-motivated senior software engineer - take initiative and solve problems

@@ -1,0 +1,11 @@
+# Task ID: 3
+# Title: Implement Tool Schemas and Function Calling
+# Status: pending
+# Dependencies: 2
+# Priority: high
+# Description: Add support for tool use including web search, database queries, and multimodal inputs.
+# Details:
+Extend the agent to: 1) Define tool schemas in the live.connect call, including webSearch and other functions, 2) Detect and handle functionCall in server responses, 3) Execute the appropriate function (HTTP fetch, DB query), 4) Stream results back to the session with sendClientContent, 5) Add support for image uploads via files.upload API and createPartFromUri. Implement at least webSearch as the first tool.
+
+# Test Strategy:
+Test function calling with mock external services. Verify the agent can detect function calls, execute them, and properly handle the results.

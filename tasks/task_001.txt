@@ -1,0 +1,11 @@
+# Task ID: 1
+# Title: Implement Vector Memory Module
+# Status: done
+# Dependencies: None
+# Priority: high
+# Description: Create a memory module that embeds and stores observations for later retrieval by similarity search.
+# Details:
+Create src/memory.ts with a VectorMemory class that: 1) Uses Gemini's embedContent API to convert text observations to embeddings, 2) Stores embeddings with metadata in a lightweight vector store (HNSW or SQLite), 3) Implements similarity search to retrieve top-K similar memories, 4) Provides methods for adding new memories and querying existing ones. Include proper typing and error handling.
+
+# Test Strategy:
+Write unit tests that verify embedding storage and retrieval with mock data. Test edge cases like empty queries and large result sets.

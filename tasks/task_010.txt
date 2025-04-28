@@ -1,0 +1,11 @@
+# Task ID: 10
+# Title: Create Testing Infrastructure
+# Status: pending
+# Dependencies: 1, 2, 3, 4, 6
+# Priority: low
+# Description: Develop comprehensive tests for core modules and integration points.
+# Details:
+Implement: 1) Integration tests that use real Gemini countTokens but mock generateContent, 2) Property-based tests for ReplayBuffer size() and sample() methods, 3) End-to-end tests for the full agent loop, 4) Performance tests for the vector memory module. Use a testing framework compatible with the project's structure and include both unit and integration tests.
+
+# Test Strategy:
+Run the test suite regularly during development. Verify it catches API drift and implementation errors. Measure test coverage to ensure comprehensive testing.

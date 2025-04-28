@@ -1,0 +1,11 @@
+# Task ID: 9
+# Title: Implement Safety Filters and Policy Compliance
+# Status: pending
+# Dependencies: 2, 4
+# Priority: medium
+# Description: Add safety mechanisms to ensure the agent follows policies and handles filtered content appropriately.
+# Details:
+Enhance the agent to: 1) Pass systemInstruction that enforces policy compliance, 2) Detect safetyFilters in serverContent responses, 3) Assign negative rewards (-1) for blocked outputs, 4) Log safety events for review, 5) Implement graceful handling of filtered responses. Ensure the system instruction is comprehensive but doesn't overly constrain the agent.
+
+# Test Strategy:
+Test with inputs designed to trigger safety filters. Verify negative rewards are assigned correctly and the agent handles filtered content appropriately.

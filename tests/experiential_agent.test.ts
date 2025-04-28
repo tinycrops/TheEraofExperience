@@ -49,6 +49,18 @@ jest.mock('fs', () => {
   };
 });
 
+// Mock better-sqlite3 to avoid native dependency issues in tests
+jest.mock('better-sqlite3', () => {
+  return jest.fn().mockImplementation(() => ({
+    prepare: jest.fn().mockReturnValue({
+      all: jest.fn().mockReturnValue([]),
+      run: jest.fn()
+    }),
+    pragma: jest.fn(),
+    exec: jest.fn()
+  }));
+});
+
 describe('Experiential Agent Components', () => {
   beforeAll(() => {
     // Use the real API key from .env.local
@@ -183,6 +195,41 @@ describe('Experiential Agent Components', () => {
       
       // Learning shouldn't throw an error
       await expect(agent.learn(experiences)).resolves.not.toThrow();
+    }, 20000);
+  });
+});
+
+describe('Experiential Agent Integration', () => {
+  it('should include sessionId in Experience and NDJSON log', async () => {
+    // Import the Experience type and persistExperience function
+    const { Experience } = require('../src/experiential_agent');
+    // Create a fake sessionId
+    const sessionId = 'test-session-1234';
+    // Create a sample experience
+    const experience: Experience = {
+      obs: { message: { text: 'hello' }, timestamp: new Date().toISOString() },
+      reward: 1.0,
+      done: false,
+      next_obs: null,
+      action: { parts: [{ text: 'world' }] },
+      sessionId: sessionId
+    };
+    // Mock fs.appendFile to capture the written data
+    const fs = require('fs');
+    let writtenData = '';
+    fs.appendFile.mockImplementation((path, data, cb) => {
+      writtenData = data;
+      cb(null);
     });
+    // Import persistExperience
+    const { persistExperience } = require('../src/experiential_agent');
+    await persistExperience(experience);
+    // Check that the written NDJSON includes the sessionId
+    expect(writtenData).toContain(sessionId);
+    // Check that the written NDJSON is valid JSON per line
+    const parsed = JSON.parse(writtenData.trim());
+    expect(parsed.sessionId).toBe(sessionId);
+    expect(parsed.obs.message.text).toBe('hello');
+    expect(parsed.action.parts[0].text).toBe('world');
   });
 }); 

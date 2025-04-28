@@ -1,0 +1,11 @@
+# Task ID: 2
+# Title: Create Basic Agent Loop with Experience Logging
+# Status: done
+# Dependencies: 1
+# Priority: high
+# Description: Implement the core experiential agent with NDJSON logging of all interactions.
+# Details:
+Develop src/experiential_agent.ts that: 1) Initializes a connection to Gemini via live.connect, 2) Handles basic conversation flow, 3) Logs all interactions to NDJSON format with timestamps and session IDs, 4) Integrates with the vector memory to store observations, 5) Implements a basic act() method that generates responses using Gemini. Structure the Experience object to include user input, agent response, and metadata.
+
+# Test Strategy:
+Create integration tests that verify the agent can process inputs, generate responses, and correctly log experiences. Validate NDJSON output format.

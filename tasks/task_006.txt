@@ -1,0 +1,11 @@
+# Task ID: 6
+# Title: Build PPO Update Loop and Periodic Worker
+# Status: pending
+# Dependencies: 4
+# Priority: high
+# Description: Create a system for periodically updating the agent's policy based on accumulated experience.
+# Details:
+Implement: 1) A ReplayBuffer class to store and sample experiences, 2) A small TensorFlow.js model to estimate values from observation embeddings, 3) A periodic worker script that samples from the buffer, computes advantages, and either creates a tuning job via the Tunings API or builds an instruction prefix with high-advantage examples, 4) Logic to update the agent with the new policy. Store the instruction prefix in ./prompts/policy_prefix.txt.
+
+# Test Strategy:
+Test the ReplayBuffer with mock data. Verify the worker can sample experiences, compute advantages, and generate either tuning jobs or instruction prefixes.

@@ -1,0 +1,170 @@
+<context>
+# Overview
+The "Era of Experience" project aims to build an agent that learns from streams of experience, leveraging Gemini GenAI SDK. The goal is to create a self-improving, memory-augmented agent that can act, recall, and learn from its interactions, ultimately compounding its capabilities over time. This system is designed for developers and researchers interested in reinforcement learning, LLM-based agents, and automated tool use.
+
+# Core Features
+- **Long-Horizon Memory:**
+  - Vector memory module for embedding and recalling past observations.
+  - Nightly summarization and cold storage of experience.
+- **First-Class Tool Use:**
+  - Function calling and tool schemas for web search, DB queries, and multimodal input (image/file upload).
+- **Grounded, Scalable Rewards:**
+  - User and automated critic feedback, external metrics, and safety filters.
+- **Self-Improving PPO Loop:**
+  - Periodic policy updates using sampled experience and model tuning.
+- **Observability & Automation:**
+  - Prometheus-style metrics, automated retraining, and deployment scripts.
+- **Token & Context Hygiene:**
+  - Accurate token counting and context window management.
+- **Testing & Hardening:**
+  - Integration and property-based tests for core modules.
+
+# User Experience
+- **Personas:**
+  - AI/ML researchers, agent developers, and advanced users.
+- **Key Flows:**
+  - Start a live session, interact with the agent, provide feedback, and observe learning over time.
+  - Upload files/images for multimodal input.
+  - Review daily summaries and metrics.
+- **UI/UX Considerations:**
+  - Clear feedback mechanisms for user ratings.
+  - Visualizations for memory recall and reward metrics.
+
+</context>
+<PRD>
+# Technical Architecture
+- **System Components:**
+  - Experiential agent (src/experiential_agent.ts)
+  - Vector memory (src/memory.ts)
+  - Reward functions (reward_functions.ts)
+  - PPO wrapper and periodic worker
+  - Integration with Gemini GenAI SDK
+- **Data Models:**
+  - NDJSON logs for experience
+  - Embedding store (in-process HNSW or sqlite)
+  - Daily summaries (Markdown)
+- **APIs & Integrations:**
+  - Gemini GenAI SDK: live.connect, embedContent, generateContent, countTokens, files.upload, tunings.create
+  - Prometheus metrics endpoint
+- **Infrastructure:**
+  - Local or cloud storage for logs and embeddings
+  - Cron jobs for nightly summarization and retraining
+
+# Development Roadmap
+- **MVP Requirements:**
+  - Implement vector memory and similarity search
+  - Enable tool schemas and function calling
+  - Integrate user and critic feedback into rewards
+  - Add nightly summarization and cold storage
+  - Set up PPO update loop and periodic worker
+  - Add Prometheus metrics and basic tests
+- **Future Enhancements:**
+  - Expand multimodal input support
+  - Advanced world-model and chain-of-thought reasoning
+  - More robust safety and filtering mechanisms
+  - Scalable, distributed memory and experience storage
+
+# Logical Dependency Chain
+- Foundation: Vector memory, NDJSON logging, and basic agent loop
+- Next: Tool schemas, function calling, and reward integration
+- Then: Nightly summarization, PPO update loop, and metrics
+- Finally: Advanced features (multimodal, world-model, distributed storage)
+
+# Risks and Mitigations
+- **Technical Challenges:**
+  - Embedding and recall performance: Use lightweight vector stores and batch operations.
+  - Model tuning API readiness: Use instruction prefixing as a fallback.
+- **MVP Scope:**
+  - Focus on atomic, composable features that can be built upon.
+- **Resource Constraints:**
+  - Modular design to allow incremental development and testing.
+
+# Appendix
+- **Research & References:**
+  - Gemini GenAI SDK documentation
+  - PPO and RL literature
+  - Example code snippets from current implementation
+- **Technical Specifications:**
+  - See actionable improvement plan and quick-start checklist below.
+
+---
+
+## Actionable Improvement Plan (for reference)
+[Retain the detailed improvement plan and quick-start checklist from the original PRD as a reference appendix.]
+
+────────────────────────────────────────────────────────
+ACTIONABLE IMPROVEMENT PLAN
+────────────────────────────────────────────────────────
+0. Keep the Gemini-only constraint (.cursorrules). All snippets below compile under @google/genai 0.4.x.
+
+Memory / Long-Horizon Streams
+1.1 Introduce a Vector Memory module (src/memory.ts).
+– On every observation, call ai.models.embedContent({model:'text-embedding-004', contents:obsTxt}).
+– Store {embedding, obsId, metadata} in a lightweight vector store (e.g. in-process HNSW or sqlite blob).
+1.2 Prior to agent.act(), retrieve top-K similar memories and feed them as context parts.
+1.3 Add nightly summarisation job (see sdk-samples/generate_content_streaming.ts):
+– Chunk yesterday's NDJSON, summarise with generateContentStream → write daily_summary.md → files.upload for cheap cold storage.
+
+Actions: first-class tool use
+2.1 Uncomment and extend tools array in live.connect:
+
+tools:[{functionDeclarations:[{
+    name:'webSearch',description:'SERP',parameters:{type:'object',
+       properties:{query:{type:'string'}},required:['query']}}]}]
+2.2 In onmessage(), detect functionCall in msg.serverContent; if present, run the function (fetch, DB query, …) and stream the result back with session.sendClientContent.
+2.3 Add Modality.IMAGE input pathway: if user pastes an image, first upload via files.upload then pass createPartFromUri in sendClientContent. (Reuse ImageUpload.tsx logic.)
+
+Grounded, scalable rewards
+3.1 Wire demo.ts feedback prompt into reward_functions.ts: persist rating in Experience.info and use it in userFeedbackReward().
+3.2 Add an automated "critic" model that is different from the policy model:
+const CRITIC_MODEL='gemini-2.0'; use it inside relevanceReward to avoid self-agreement.
+3.3 Integrate grounded metrics: e.g. response latency, cost, or external API success.
+experience.reward += latency_penalty + http_success_bonus.
+
+Upgrade PPO to a real update loop
+4.1 Replace generateContent-based value estimation with a small local regression (TensorFlow.js dense net) trained on (obsEmbedding, return).
+Call memory.embedContent to get obsEmbedding.
+4.2 Move "learn" out of process loop; run a periodic worker that:
+– Samples ReplayBuffer,
+– Computes advantages,
+– Finetunes a tuning job via SDK Tunings API:
+
+await genAI.tunings.create({model:'gemini-2.0-flash',datasetUri:file.uri});
+Until tunings GA is ready, approximate by building an "instruction prefix" that includes distilled high-advantage exemplars, saved to ./prompts/policy_prefix.txt and prepended in agent.act().
+
+Token & context hygiene
+5.1 Replace tokenCost() with official countTokens():
+
+const n = (await genAI.models.countTokens({model,contents})).totalTokens;
+5.2 Add sliding-window truncation: if historyTokens > 16k – retrieve last N user/model turns + top-K memories.
+
+Observability & Flywheel Automation
+6.1 Emit Prometheus-style metrics (buffer size, reward mean, latency).
+6.2 Create scripts/cron_retrain.sh which:
+– Zips previous day's NDJSON,
+– Uploads with files.upload,
+– Triggers step 4 worker,
+– Reports new policy BLEU/reward on held-out validation chat set.
+
+Safety & Filtering
+7.1 Pass systemInstruction that enforces policy compliance.
+7.2 Intercept safetyFilters in serverContent and set reward –1 for blocked outputs.
+
+Testing hardening
+8.1 Add integration test that uses the real Gemini countTokens endpoint but mocks generateContent (to catch API drift).
+8.2 Property-based tests on ReplayBuffer.size()/sample().
+
+────────────────────────────────────────────────────────
+"FLYWHEEL" QUICK-START CHECKLIST
+────────────────────────────────────────────────────────
+A. Capture  live.connect → persistExperience → embedContent
+B. Recall   similarity search → prepend memories
+C. Act      policy_prefix + current obs → generateContent / functionCalling
+D. Measure  calcReward (user + critic + metrics)
+E. Learn    batch sample → PPO/Tuning update → commit new policy_prefix
+F. Deploy   restart agent with new prefix; repeat daily
+
+Each arrow above is backed by a concrete Gemini GenAI SDK call (live.connect, embedContent, generateContent, countTokens, files.upload, tunings.create). Once the nightly worker (Step E) is automated, the flywheel will spin continuously, compounding capability with every 24 h of accumulated experience.
+
+</PRD>
+

@@ -1,0 +1,143 @@
+{
+  "tasks": [
+    {
+      "id": 1,
+      "title": "Implement Vector Memory Module",
+      "description": "Create a memory module that embeds and stores observations for later retrieval by similarity search.",
+      "status": "done",
+      "dependencies": [],
+      "priority": "high",
+      "details": "Create src/memory.ts with a VectorMemory class that: 1) Uses Gemini's embedContent API to convert text observations to embeddings, 2) Stores embeddings with metadata in a lightweight vector store (HNSW or SQLite), 3) Implements similarity search to retrieve top-K similar memories, 4) Provides methods for adding new memories and querying existing ones. Include proper typing and error handling.",
+      "testStrategy": "Write unit tests that verify embedding storage and retrieval with mock data. Test edge cases like empty queries and large result sets."
+    },
+    {
+      "id": 2,
+      "title": "Create Basic Agent Loop with Experience Logging",
+      "description": "Implement the core experiential agent with NDJSON logging of all interactions.",
+      "status": "pending",
+      "dependencies": [
+        1
+      ],
+      "priority": "high",
+      "details": "Develop src/experiential_agent.ts that: 1) Initializes a connection to Gemini via live.connect, 2) Handles basic conversation flow, 3) Logs all interactions to NDJSON format with timestamps and session IDs, 4) Integrates with the vector memory to store observations, 5) Implements a basic act() method that generates responses using Gemini. Structure the Experience object to include user input, agent response, and metadata.",
+      "testStrategy": "Create integration tests that verify the agent can process inputs, generate responses, and correctly log experiences. Validate NDJSON output format."
+    },
+    {
+      "id": 3,
+      "title": "Implement Tool Schemas and Function Calling",
+      "description": "Add support for tool use including web search, database queries, and multimodal inputs.",
+      "status": "pending",
+      "dependencies": [
+        2
+      ],
+      "priority": "high",
+      "details": "Extend the agent to: 1) Define tool schemas in the live.connect call, including webSearch and other functions, 2) Detect and handle functionCall in server responses, 3) Execute the appropriate function (HTTP fetch, DB query), 4) Stream results back to the session with sendClientContent, 5) Add support for image uploads via files.upload API and createPartFromUri. Implement at least webSearch as the first tool.",
+      "testStrategy": "Test function calling with mock external services. Verify the agent can detect function calls, execute them, and properly handle the results."
+    },
+    {
+      "id": 4,
+      "title": "Develop Reward Functions",
+      "description": "Create a system for calculating rewards based on user feedback, critic evaluation, and external metrics.",
+      "status": "pending",
+      "dependencies": [
+        2
+      ],
+      "priority": "medium",
+      "details": "Create reward_functions.ts that: 1) Implements userFeedbackReward() to process explicit ratings, 2) Creates an automated critic using a separate model (gemini-2.0) for relevanceReward, 3) Adds metric-based rewards like latency penalties and success bonuses, 4) Combines multiple reward signals into a final score, 5) Stores rewards in the Experience object. Ensure rewards are normalized and consistent.",
+      "testStrategy": "Write unit tests for each reward function with various inputs. Test the aggregation of multiple reward signals and verify the critic model is different from the policy model."
+    },
+    {
+      "id": 5,
+      "title": "Implement Nightly Summarization Job",
+      "description": "Create a process to summarize daily experiences and store them efficiently.",
+      "status": "pending",
+      "dependencies": [
+        2
+      ],
+      "priority": "medium",
+      "details": "Develop a script that: 1) Runs on a daily schedule, 2) Chunks the previous day's NDJSON logs, 3) Uses generateContentStream to create summaries, 4) Writes summaries to daily_summary.md files, 5) Uploads summaries to cold storage using files.upload, 6) Maintains an index of available summaries. Include proper error handling and logging for this background process.",
+      "testStrategy": "Test the summarization with sample NDJSON files. Verify the chunking logic works with various log sizes and the summaries are properly formatted and stored."
+    },
+    {
+      "id": 6,
+      "title": "Build PPO Update Loop and Periodic Worker",
+      "description": "Create a system for periodically updating the agent's policy based on accumulated experience.",
+      "status": "pending",
+      "dependencies": [
+        4
+      ],
+      "priority": "high",
+      "details": "Implement: 1) A ReplayBuffer class to store and sample experiences, 2) A small TensorFlow.js model to estimate values from observation embeddings, 3) A periodic worker script that samples from the buffer, computes advantages, and either creates a tuning job via the Tunings API or builds an instruction prefix with high-advantage examples, 4) Logic to update the agent with the new policy. Store the instruction prefix in ./prompts/policy_prefix.txt.",
+      "testStrategy": "Test the ReplayBuffer with mock data. Verify the worker can sample experiences, compute advantages, and generate either tuning jobs or instruction prefixes."
+    },
+    {
+      "id": 7,
+      "title": "Implement Token Counting and Context Management",
+      "description": "Add accurate token counting and sliding window context management.",
+      "status": "pending",
+      "dependencies": [
+        2
+      ],
+      "priority": "medium",
+      "details": "Enhance the agent to: 1) Replace any estimated token counting with the official countTokens() API, 2) Implement sliding-window truncation that keeps the context within limits (16k tokens), 3) Intelligently select which content to keep (last N turns + top-K memories), 4) Track token usage for reporting and optimization. Ensure the context window management preserves the most relevant information.",
+      "testStrategy": "Test with conversations of various lengths to verify the sliding window works correctly. Compare token counts with the official API to ensure accuracy."
+    },
+    {
+      "id": 8,
+      "title": "Add Prometheus Metrics and Automation Scripts",
+      "description": "Implement observability metrics and automation for the retraining process.",
+      "status": "pending",
+      "dependencies": [
+        6
+      ],
+      "priority": "low",
+      "details": "Create: 1) A Prometheus-compatible metrics endpoint that exposes buffer size, reward mean, latency, etc., 2) scripts/cron_retrain.sh that zips previous day's logs, uploads them, triggers the PPO worker, and reports performance on validation data, 3) Dashboard templates for visualizing agent performance over time. Use standard Prometheus formatting for metrics.",
+      "testStrategy": "Verify metrics are correctly formatted and exposed. Test the automation script with sample data to ensure it correctly packages logs and triggers retraining."
+    },
+    {
+      "id": 9,
+      "title": "Implement Safety Filters and Policy Compliance",
+      "description": "Add safety mechanisms to ensure the agent follows policies and handles filtered content appropriately.",
+      "status": "pending",
+      "dependencies": [
+        2,
+        4
+      ],
+      "priority": "medium",
+      "details": "Enhance the agent to: 1) Pass systemInstruction that enforces policy compliance, 2) Detect safetyFilters in serverContent responses, 3) Assign negative rewards (-1) for blocked outputs, 4) Log safety events for review, 5) Implement graceful handling of filtered responses. Ensure the system instruction is comprehensive but doesn't overly constrain the agent.",
+      "testStrategy": "Test with inputs designed to trigger safety filters. Verify negative rewards are assigned correctly and the agent handles filtered content appropriately."
+    },
+    {
+      "id": 10,
+      "title": "Create Testing Infrastructure",
+      "description": "Develop comprehensive tests for core modules and integration points.",
+      "status": "pending",
+      "dependencies": [
+        1,
+        2,
+        3,
+        4,
+        6
+      ],
+      "priority": "low",
+      "details": "Implement: 1) Integration tests that use real Gemini countTokens but mock generateContent, 2) Property-based tests for ReplayBuffer size() and sample() methods, 3) End-to-end tests for the full agent loop, 4) Performance tests for the vector memory module. Use a testing framework compatible with the project's structure and include both unit and integration tests.",
+      "testStrategy": "Run the test suite regularly during development. Verify it catches API drift and implementation errors. Measure test coverage to ensure comprehensive testing."
+    },
+    {
+      "id": 11,
+      "title": "Implement Persistent Storage for VectorMemory using HNSW or SQLite",
+      "description": "Enhance the VectorMemory module to support disk-based persistent storage of embeddings and metadata using either HNSW or SQLite, while maintaining the existing API and ensuring efficient similarity search capabilities.",
+      "details": "Extend the VectorMemory module to store vector embeddings and associated metadata on disk rather than only in memory. This implementation should:\n\n1. Create a new storage backend that uses either:\n   - HNSW (Hierarchical Navigable Small World) for efficient approximate nearest neighbor search\n   - SQLite with appropriate indexing for vector similarity search\n\n2. Maintain the existing API methods:\n   - `addMemory(text, embedding, metadata)` - Should now persist to disk\n   - `querySimilar(embedding, limit)` - Should query from persistent storage\n\n3. Implement a configuration mechanism to specify storage location, index parameters, and other relevant settings\n\n4. Add a migration utility to transfer existing in-memory data to the new persistent storage\n\n5. Ensure thread-safety for concurrent read/write operations\n\n6. Implement proper resource management (connection pooling if using SQLite, index loading/unloading for HNSW)\n\n7. Add performance optimizations:\n   - Caching frequently accessed vectors\n   - Batch operations for bulk imports\n   - Background indexing for large datasets\n\n8. Handle edge cases:\n   - Graceful recovery from corrupted storage\n   - Automatic reindexing when needed\n   - Versioning for future compatibility\n\nDependencies to consider:\n- For HNSW: hnswlib, faiss, or similar libraries\n- For SQLite: sqlite3 with appropriate extensions for vector operations\n\nPerformance requirements:\n- Should support at least 1M vectors with sub-second query times\n- Minimal memory footprint regardless of dataset size",
+      "testStrategy": "Testing should verify both functional correctness and performance characteristics:\n\n1. Unit Tests:\n   - Test persistence by adding vectors, restarting the service, and verifying they can be retrieved\n   - Verify that metadata is correctly stored and retrieved with vectors\n   - Test edge cases: empty database, very large vectors, malformed inputs\n   - Verify API compatibility with existing code that uses VectorMemory\n\n2. Integration Tests:\n   - Test the migration utility with various dataset sizes\n   - Verify that existing application flows work with the new storage backend\n\n3. Performance Tests:\n   - Benchmark query times for different dataset sizes (10K, 100K, 1M vectors)\n   - Measure memory usage during operation\n   - Test concurrent read/write operations and verify correctness\n   - Compare performance between HNSW and SQLite implementations\n\n4. Stress Tests:\n   - Test with very large datasets to verify scaling capabilities\n   - Simulate disk failures or corruption and verify recovery\n\n5. Specific Test Cases:\n   - Add 1000 vectors, restart, verify all are retrievable\n   - Perform similarity search and compare results with in-memory implementation\n   - Verify that updates to existing vectors are correctly persisted\n   - Test with various embedding dimensions (128, 384, 768, 1536)\n   - Verify that deleting vectors removes them from persistent storage",
+      "status": "pending",
+      "dependencies": [],
+      "priority": "high"
+    }
+  ],
+  "metadata": {
+    "projectName": "Era of Experience",
+    "totalTasks": 10,
+    "sourceFile": "/home/ath/TheEraofExperience/scripts/prd.txt",
+    "generatedAt": "2023-06-15"
+  }
+}

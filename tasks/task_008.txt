@@ -1,0 +1,11 @@
+# Task ID: 8
+# Title: Add Prometheus Metrics and Automation Scripts
+# Status: pending
+# Dependencies: 6
+# Priority: low
+# Description: Implement observability metrics and automation for the retraining process.
+# Details:
+Create: 1) A Prometheus-compatible metrics endpoint that exposes buffer size, reward mean, latency, etc., 2) scripts/cron_retrain.sh that zips previous day's logs, uploads them, triggers the PPO worker, and reports performance on validation data, 3) Dashboard templates for visualizing agent performance over time. Use standard Prometheus formatting for metrics.
+
+# Test Strategy:
+Verify metrics are correctly formatted and exposed. Test the automation script with sample data to ensure it correctly packages logs and triggers retraining.

@@ -1,0 +1,11 @@
+# Task ID: 7
+# Title: Implement Token Counting and Context Management
+# Status: pending
+# Dependencies: 2
+# Priority: medium
+# Description: Add accurate token counting and sliding window context management.
+# Details:
+Enhance the agent to: 1) Replace any estimated token counting with the official countTokens() API, 2) Implement sliding-window truncation that keeps the context within limits (16k tokens), 3) Intelligently select which content to keep (last N turns + top-K memories), 4) Track token usage for reporting and optimization. Ensure the context window management preserves the most relevant information.
+
+# Test Strategy:
+Test with conversations of various lengths to verify the sliding window works correctly. Compare token counts with the official API to ensure accuracy.

@@ -4,6 +4,7 @@ import { calcReward } from './reward_functions';
 import * as dotenv from 'dotenv-flow';
 import * as fs from 'fs';
 import * as path from 'path';
+import { VectorMemory } from './memory';
 
 // Load environment variables - explicitly include .env.local
 dotenv.config({
@@ -39,6 +40,7 @@ export interface Experience {
   next_obs?: any;          // Next observation (optional)
   info?: Record<string, any>; // Additional information (optional)
   action?: any;            // Action taken by the agent
+  sessionId: string;       // Unique session identifier
 }
 
 // Helper function to extract observation from message
@@ -71,10 +73,9 @@ function ensureDataDirectory() {
 }
 
 // Function to save experience to NDJSON file
-async function persistExperience(experience: Experience): Promise<void> {
+export async function persistExperience(experience: Experience): Promise<void> {
   const filepath = ensureDataDirectory();
   const serialized = JSON.stringify(experience) + '\n';
-  
   return new Promise((resolve, reject) => {
     fs.appendFile(filepath, serialized, (err) => {
       if (err) reject(err);
@@ -122,9 +123,16 @@ export async function runExperientialAgent() {
 
   console.log(`Initializing experiential agent with model ${modelName}...`);
 
+  // Generate a unique session ID (e.g., ISO timestamp + random hex)
+  const sessionId = `${new Date().toISOString()}-${Math.random().toString(16).slice(2, 10)}`;
+  console.log(`Session ID: ${sessionId}`);
+
   // Initialize the real Google GenAI client
   const genAI = new GoogleGenAI({apiKey});
   
+  // Persistent vector memory
+  const vectorMemory = new VectorMemory(apiKey);
+
   // Create replay buffer and PPO agent
   const buffer = new ReplayBuffer(1e6);
   const agent = new PPO({ 
@@ -175,6 +183,17 @@ export async function runExperientialAgent() {
           // Record the observation for later use
           currentObs = obs;
           
+          // --- Vector Memory Integration ---
+          try {
+            await vectorMemory.addMemory(obs.message.text || '', obs.timestamp, obs.message);
+            const topMemories = await vectorMemory.querySimilar(obs.message.text || '', 5);
+            console.log('Top similar memories:', topMemories.map(m => m.text));
+            // Optionally: pass topMemories to agent.act if agent supports it
+          } catch (memErr) {
+            console.error('VectorMemory error:', memErr);
+          }
+          // --- End Vector Memory Integration ---
+          
           // Get action from agent
           const action = await agent.act(obs);
           
@@ -192,7 +211,8 @@ export async function runExperientialAgent() {
             reward,
             done: false, // For ongoing conversations
             next_obs: null, // Will be filled in later
-            action: action
+            action: action,
+            sessionId: sessionId
           };
           
           // Add experience to replay buffer

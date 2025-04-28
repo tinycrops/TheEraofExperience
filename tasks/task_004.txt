@@ -1,0 +1,11 @@
+# Task ID: 4
+# Title: Develop Reward Functions
+# Status: pending
+# Dependencies: 2
+# Priority: medium
+# Description: Create a system for calculating rewards based on user feedback, critic evaluation, and external metrics.
+# Details:
+Create reward_functions.ts that: 1) Implements userFeedbackReward() to process explicit ratings, 2) Creates an automated critic using a separate model (gemini-2.0) for relevanceReward, 3) Adds metric-based rewards like latency penalties and success bonuses, 4) Combines multiple reward signals into a final score, 5) Stores rewards in the Experience object. Ensure rewards are normalized and consistent.
+
+# Test Strategy:
+Write unit tests for each reward function with various inputs. Test the aggregation of multiple reward signals and verify the critic model is different from the policy model.
